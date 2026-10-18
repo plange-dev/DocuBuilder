@@ -5,7 +5,8 @@ Kleines Desktop-Tool für Windows und Linux: Eine Auswahl an Buttons, jeder Butt
 ## Funktionen
 - Buttons öffnen Excel-Dateien mit dem Standardprogramm (Windows: Excel, Linux: `xdg-open`)
 - Unterstützt lokale Pfade, Netzpfade (`\\Server\Freigabe\datei.xlsx`) und Web-Links
-- Einstellungen mit drei Reitern: **Einträge**, **Allgemein** (Ansicht hell/dunkel/System) und **Info**
+- Einstellungen mit zwei Reitern: **Einträge** und **Allgemein** (Ansicht hell/dunkel/System, Updates)
+- **Menü** oben rechts: Nach Updates suchen, Info zu DocuBuilder, Beenden
 - **Anmeldung** beim Start mit Benutzername und Passwort; das Konto **Admin** besteht immer
 - **Default-Fenster**: beim ersten Start legst du das Admin-Passwort, die Benutzer, die Anzahl der Buttons und den Ordner mit deinen Dateien fest (Excel-Dateien aus dem Ordner können direkt als Buttons übernommen werden). Danach öffnet es sich nur noch mit **ALT+F11** (alternativ **STRG+UMSCHALT+F11**)
 - Einstellungen liegen **verschlüsselt und versteckt**; ändern dürfen sie nur der **Admin und Benutzer mit Recht** (siehe Abschnitt „Benutzer und Rechte“)
@@ -40,7 +41,7 @@ Beim Start meldet man sich mit Benutzername und Passwort an (Groß-/Kleinschreib
 Mit **Übernehmen** wird gespeichert. Das Konto „Admin“ kann weder gelöscht noch eingeschränkt werden.
 
 ## DocuBuilder entfernen
-Wer DocuBuilder nicht mehr verwenden will: als **Admin** anmelden → **Einstellungen → Info → „DocuBuilder-Daten entfernen …“**. Nach einer Rückfrage und erneuter Eingabe des Admin-Passworts werden gelöscht:
+Wer DocuBuilder nicht mehr verwenden will: als **Admin** anmelden → **Einstellungen → Allgemein → „DocuBuilder-Daten entfernen …“**. Nach einer Rückfrage und erneuter Eingabe des Admin-Passworts werden gelöscht:
 - die gemeinsame Konfiguration `C:\ProgramData\DocuBuilder\` (Einträge, Benutzer, Passwörter). Windows fragt dafür nach Administratorrechten (UAC).
 - die eigene Ansicht `%APPDATA%\DocuBuilder\`
 
@@ -68,9 +69,22 @@ Unter **Releases** liegen `DocuBuilder.exe` (Windows) und `DocuBuilder` (Linux).
 
 Alternativ gibt es weiterhin die einzelne `DocuBuilder.exe` ohne Installation.
 
+## Updates
+> **Hinweis:** Die Update-Funktion ist vorerst abgeschaltet (*Menü → Nach Updates suchen* ist ausgegraut). Sie wird freigeschaltet, sobald DocuBuilder signiert ausgeliefert wird, weil Smart App Control unsignierte Updates blockiert. Bis dahin neue Versionen über das Setup aus den [Releases](https://github.com/plange-dev/DocuBuilder/releases) installieren.
+
+**Menü → Nach Updates suchen …** (oder *Einstellungen → Allgemein → Jetzt nach Updates suchen*) fragt die Releases auf GitHub ab:
+- Eine **Stable**-Version sucht nur Stable-Releases, eine **Nightly**-Version zusätzlich die Vorabversionen.
+- Gibt es eine neuere Version, zeigt das Fenster die Änderungen. Das Update läuft in zwei Schritten (nur für den **Admin**):
+  1. **Herunterladen:** lädt das Update und prüft die SHA-256-Prüfsumme. DocuBuilder kann dabei weiter benutzt werden.
+  2. **DocuBuilder schließen und installieren:** Nach einer Rückfrage wird DocuBuilder geschlossen; erst dann wird installiert. Mit **Später** bleibt das Update bereit – beim Beenden von DocuBuilder wird noch einmal gefragt, ob es jetzt installiert werden soll.
+  - **Installierte Version:** Das Setup wartet, bis DocuBuilder beendet ist, und läuft dann ohne Rückfragen; Windows fragt nach Administratorrechten. Danach startet DocuBuilder neu. Einträge und Benutzer bleiben erhalten.
+  - **Einzelne `DocuBuilder.exe`:** Die Datei wird ausgetauscht und neu gestartet. Dafür braucht DocuBuilder Schreibrechte im eigenen Ordner.
+- Optional: *Einstellungen → Allgemein → „Beim Anmelden nach Updates suchen“* (standardmäßig aus) meldet sich nur, wenn es ein Update gibt.
+
 ## Selbst bauen
-- Windows-Installationsprogramm: `build_installer.bat` doppelklicken (benötigt Inno Setup 6: `winget install JRSoftware.InnoSetup`), Ergebnis `dist\DocuBuilder-Setup-<Version>.exe`
+- Windows-Installationsprogramm: `build_installer.bat` doppelklicken (benötigt Inno Setup 6: `winget install JRSoftware.InnoSetup`), Ergebnis `dist\DocuBuilder-Setup-<Version>.exe` und die portable `dist\DocuBuilder.exe`, jeweils mit Prüfsumme. Mit gesetztem `DOCUBUILDER_CERT_SHA1` wird alles signiert (siehe [CODE_SIGNING.md](CODE_SIGNING.md)).
 - Windows: `build_windows.bat` doppelklicken, Ergebnis in `dist\`
+- Icon: Vorlagen sind `assets/docubuilder.svg` (groß) und `assets/docubuilder-small.svg` (bis 32 px). Nach Änderungen `python tools/make_icons.py` ausführen (benötigt `pip install resvg-py pillow`); das erzeugt `assets/docubuilder.ico` und `assets/docubuilder.png`, die im Repo liegen.
 - Windows signieren: `sign_windows.bat <Fingerprint>` (siehe CODE_SIGNING.md)
 - Linux: `./build_linux.sh`, Ergebnis in `dist/`
 
@@ -121,6 +135,9 @@ Einträge, Dateiordner und Benutzerkonten gelten für **alle Windows-Benutzer** 
 
 **Grenzen:** Die Anmeldung schützt vor normalen Benutzern. Windows-Administratoren können die Datei immer löschen (und damit alles zurücksetzen). Wer den Quelltext kennt, kann die Verschlüsselung nachbauen, weil der Schlüsselanteil im Programm steckt.
 
+## Windows-Hinweis: Smart App Control
+Ist unter Windows 11 **Smart App Control** eingeschaltet, blockiert Windows unsignierte Programme vollständig („Eine Anwendungssteuerungsrichtlinie hat diese Datei blockiert“, Fehler 4551), auch das Update-Setup. Abhilfe ist eine Signatur von DocuBuilder und Setup (siehe [CODE_SIGNING.md](CODE_SIGNING.md)). Bis dahin lässt sich DocuBuilder auf solchen PCs nur installieren oder aktualisieren, wenn Smart App Control ausgeschaltet ist (Windows-Sicherheit → App- & Browsersteuerung). Das ist eine Sicherheitsentscheidung für den PC; je nach Windows-Version lässt es sich danach nur durch Zurücksetzen von Windows wieder einschalten.
+
 ## Windows-Hinweis: SmartScreen
 Beim ersten Start kann Windows „Der Computer wurde durch Windows geschützt" anzeigen. Das ist bei neuen Programmen normal, auch bei signierten: SmartScreen vertraut Dateien erst nach einer gewissen Zahl an Downloads und Starts.
 
@@ -134,6 +151,8 @@ Auf Rechnern, die du selbst verwaltest, lässt sich die Meldung vorab entfernen:
 
 ## Datenschutz
 Dieses Programm überträgt keine Daten an andere Systeme im Netzwerk, außer der Nutzer hat dies ausdrücklich veranlasst.
+
+Die Update-Suche ruft nur die öffentliche Release-Liste von GitHub ab (`api.github.com`) und lädt bei einem Update die Programmdatei von `github.com` herunter. Dabei werden keine Einträge, Benutzer oder sonstigen Daten übertragen. Die Suche läuft nur auf Knopfdruck oder, wenn unter *Einstellungen → Allgemein* eingeschaltet, einmal beim Anmelden.
 
 ## Lizenz
 MIT

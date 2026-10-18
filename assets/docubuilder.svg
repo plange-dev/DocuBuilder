@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="DocuBuilder">
+  <rect width="128" height="128" rx="28" fill="#3654E8"/>
+  <path d="M30 16 H74 L96 38 V104 A8 8 0 0 1 88 112 H30 A8 8 0 0 1 22 104 V24 A8 8 0 0 1 30 16 Z" fill="#FFFFFF"/>
+  <path d="M74 16 V30 A8 8 0 0 0 82 38 H96 Z" fill="#C9D3FF"/>
+  <rect x="34" y="44" width="46" height="8" rx="4" fill="#1F2A44"/>
+  <rect x="34" y="58" width="36" height="8" rx="4" fill="#1F2A44"/>
+  <rect x="34" y="72" width="22" height="8" rx="4" fill="#1F2A44"/>
+  <circle cx="90" cy="92" r="28" fill="#FFB020" stroke="#1F2A44" stroke-width="6"/>
+  <g fill="none" stroke="#1F2A44" stroke-width="5" stroke-linecap="round">
+    <path d="M77 90 A13 13 0 0 1 100 84"/>
+    <path d="M103 94 A13 13 0 0 1 80 100"/>
+  </g>
+  <g fill="#1F2A44">
+    <polygon points="103,92 94,85 106,80"/>
+    <polygon points="77,92 74,104 86,99"/>
+  </g>
+</svg>

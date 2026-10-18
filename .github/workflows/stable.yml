@@ -62,6 +62,7 @@ jobs:
         with:
           tag_name: v${{ needs.version.outputs.version }}
           name: DocuBuilder ${{ needs.version.outputs.version }}
+          generate_release_notes: true
           files: |
             out/windows/DocuBuilder.exe
             out/windows/DocuBuilder.exe.sha256

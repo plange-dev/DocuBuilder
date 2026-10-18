@@ -35,6 +35,10 @@ if "%THUMB%"=="" (
   goto :fail
 )
 
+REM --- Zertifikat pruefen (Fingerprint vorhanden, privater Schluessel nutzbar) ---
+powershell -NoProfile -Command "$t='%THUMB%'.ToUpper(); $all=@(Get-ChildItem Cert:\CurrentUser\My,Cert:\LocalMachine\My -CodeSigningCert -EA 0); $c=$all | Where-Object { $_.Thumbprint -eq $t } | select -First 1; if ($c -and $c.HasPrivateKey) { 'Zertifikat gefunden: ' + $c.Subject + ' (gueltig bis ' + $c.NotAfter.ToString('dd.MM.yyyy') + ')'; exit 0 }; if ($c) { 'FEHLER: Zertifikat gefunden, aber ohne nutzbaren privaten Schluessel (SimplySign angemeldet? Token eingesteckt?)'; exit 1 }; 'FEHLER: Kein Code-Signing-Zertifikat mit dem Fingerprint ' + $t + ' gefunden.'; if ($all.Count) { 'Vorhandene Code-Signing-Zertifikate:'; $all | ForEach-Object { '  ' + $_.Thumbprint + '  ' + $_.Subject } } else { 'Auf diesem PC ist ueberhaupt kein Code-Signing-Zertifikat vorhanden.'; 'Bei Certum: SimplySign Desktop starten und anmelden. Sonst wird zuerst ein Zertifikat benoetigt (siehe CODE_SIGNING.md).' }; exit 1"
+if errorlevel 1 goto :fail
+
 REM --- signtool suchen ---
 set "SIGNTOOL="
 where signtool >nul 2>&1 && set "SIGNTOOL=signtool"

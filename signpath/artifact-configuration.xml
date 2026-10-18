@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Diese Konfiguration wird im SignPath-Projekt unter "Artifact Configurations" hinterlegt. -->
+<!-- Diese Konfiguration wird im SignPath-Projekt unter "Artifact Configurations" hinterlegt.
+     Signiert die portable Einzeldatei und das Programm im Programmordner (für das Setup). -->
 <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
   <zip-file>
     <pe-file path="DocuBuilder.exe">
+      <authenticode-sign/>
+    </pe-file>
+    <pe-file path="DocuBuilder/DocuBuilder.exe">
       <authenticode-sign/>
     </pe-file>
   </zip-file>

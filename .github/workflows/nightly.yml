@@ -54,6 +54,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: DocuBuilder Nightly ${{ needs.version.outputs.version }}
           prerelease: true
+          generate_release_notes: true
           body: Vorabversion mit den neuesten Änderungen. Nicht für den produktiven Einsatz.
           files: |
             out/windows/DocuBuilder.exe

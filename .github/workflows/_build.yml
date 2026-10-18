@@ -31,15 +31,21 @@ jobs:
       - name: Version setzen
         run: python tools/version.py set ${{ inputs.version }} --channel ${{ inputs.channel }}
       - run: python -m pip install pyinstaller
+      # Programmordner (für das Setup; keine sich selbst entpackende Datei → weniger Fehlalarme)
+      # und portable Einzeldatei
       - name: Bauen
-        run: python -m PyInstaller --onefile --windowed --name DocuBuilder --version-file version_info.txt docubuilder.py
+        run: |
+          python -m PyInstaller --noconfirm --onedir --windowed --name DocuBuilder --workpath build/onedir --version-file version_info.txt --icon assets/docubuilder.ico --add-data "assets/docubuilder.ico:assets" --add-data "assets/docubuilder.png:assets" docubuilder.py
+          python -m PyInstaller --noconfirm --onefile --windowed --name DocuBuilder --workpath build/onefile --version-file version_info.txt --icon assets/docubuilder.ico --add-data "assets/docubuilder.ico:assets" --add-data "assets/docubuilder.png:assets" docubuilder.py
 
-      - name: Unsignierte Datei hochladen
+      - name: Unsignierte Dateien hochladen
         id: unsigned
         uses: actions/upload-artifact@v4
         with:
           name: unsigned-windows
-          path: dist/DocuBuilder.exe
+          path: |
+            dist/DocuBuilder.exe
+            dist/DocuBuilder/DocuBuilder.exe
 
       # Signieren nur, wenn SignPath eingerichtet ist (Repository-Variable SIGNPATH_ORGANIZATION_ID gesetzt)
       - name: Mit SignPath signieren
@@ -56,16 +62,19 @@ jobs:
           wait-for-completion: true
           output-artifact-directory: signed
 
-      - name: Signierte Datei übernehmen und prüfen
+      - name: Signierte Dateien übernehmen und prüfen
         if: ${{ steps.sign.outcome == 'success' }}
         shell: pwsh
         run: |
           $zip = Get-ChildItem signed -Filter *.zip -ErrorAction SilentlyContinue
           if ($zip) { Expand-Archive $zip.FullName -DestinationPath signed -Force }
           Copy-Item signed\DocuBuilder.exe dist\DocuBuilder.exe -Force
-          $sig = Get-AuthenticodeSignature dist\DocuBuilder.exe
-          Write-Host "Signaturstatus: $($sig.Status)"
-          if ($sig.Status -ne 'Valid') { throw "Signatur ungültig: $($sig.Status)" }
+          Copy-Item signed\DocuBuilder\DocuBuilder.exe dist\DocuBuilder\DocuBuilder.exe -Force
+          foreach ($f in "dist\DocuBuilder.exe", "dist\DocuBuilder\DocuBuilder.exe") {
+            $sig = Get-AuthenticodeSignature $f
+            Write-Host "Signaturstatus ${f}: $($sig.Status)"
+            if ($sig.Status -ne 'Valid') { throw "Signatur ungültig: $f ($($sig.Status))" }
+          }
 
       - name: Installationsprogramm bauen
         shell: pwsh
@@ -76,6 +85,50 @@ jobs:
           if (-not $iscc) { throw "ISCC.exe nicht gefunden" }
           & $iscc "/DAppVersion=${{ inputs.version }}" "/DAppChannel=${{ inputs.channel }}" installer\DocuBuilder.iss
           if ($LASTEXITCODE) { throw "Inno Setup fehlgeschlagen" }
+
+      # Setup ebenfalls signieren (sonst blockiert z. B. Smart App Control das Update).
+      # Nur, wenn dafür eine eigene Artifact Configuration hinterlegt ist
+      # (Repository-Variable SIGNPATH_SETUP_ARTIFACT_CONFIGURATION_SLUG, siehe CODE_SIGNING.md).
+      - name: Setup für die Signierung vorbereiten
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && vars.SIGNPATH_SETUP_ARTIFACT_CONFIGURATION_SLUG != '' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory setup-unsigned | Out-Null
+          Copy-Item "dist\DocuBuilder-Setup-${{ inputs.version }}.exe" setup-unsigned\DocuBuilder-Setup.exe
+
+      - name: Unsigniertes Setup hochladen
+        id: unsigned_setup
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && vars.SIGNPATH_SETUP_ARTIFACT_CONFIGURATION_SLUG != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-setup
+          path: setup-unsigned/DocuBuilder-Setup.exe
+
+      - name: Setup mit SignPath signieren
+        id: sign_setup
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && vars.SIGNPATH_SETUP_ARTIFACT_CONFIGURATION_SLUG != '' }}
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_SETUP_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned_setup.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-setup
+
+      - name: Signiertes Setup übernehmen und prüfen
+        if: ${{ steps.sign_setup.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem signed-setup -Filter *.zip -ErrorAction SilentlyContinue
+          if ($zip) { Expand-Archive $zip.FullName -DestinationPath signed-setup -Force }
+          $target = "dist\DocuBuilder-Setup-${{ inputs.version }}.exe"
+          Copy-Item signed-setup\DocuBuilder-Setup.exe $target -Force
+          $sig = Get-AuthenticodeSignature $target
+          Write-Host "Signaturstatus Setup: $($sig.Status)"
+          if ($sig.Status -ne 'Valid') { throw "Signatur des Setups ungültig: $($sig.Status)" }
 
       - name: Prüfsummen erzeugen
         shell: pwsh
@@ -106,7 +159,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y python3-tk
       - run: python -m pip install pyinstaller
       - name: Bauen
-        run: python -m PyInstaller --onefile --windowed --name DocuBuilder docubuilder.py
+        run: python -m PyInstaller --onefile --windowed --name DocuBuilder --add-data "assets/docubuilder.png:assets" docubuilder.py
       - name: Prüfsumme erzeugen
         run: cd dist && sha256sum DocuBuilder > DocuBuilder.sha256
       - uses: actions/upload-artifact@v4

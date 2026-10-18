@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 128 128" role="img" aria-label="DocuBuilder">
+  <rect width="128" height="128" rx="28" fill="#3654E8"/>
+  <path d="M30 16 H74 L96 38 V104 A8 8 0 0 1 88 112 H30 A8 8 0 0 1 22 104 V24 A8 8 0 0 1 30 16 Z" fill="#FFFFFF"/>
+  <path d="M74 16 V30 A8 8 0 0 0 82 38 H96 Z" fill="#C9D3FF"/>
+  <rect x="34" y="46" width="46" height="11" rx="5.5" fill="#1F2A44"/>
+  <rect x="34" y="65" width="28" height="11" rx="5.5" fill="#1F2A44"/>
+  <circle cx="90" cy="92" r="28" fill="#FFB020" stroke="#1F2A44" stroke-width="7"/>
+  <path d="M77 92 A13 13 0 1 1 90 105" fill="none" stroke="#1F2A44" stroke-width="7" stroke-linecap="round"/>
+  <polygon points="80,105 91,97 91,113" fill="#1F2A44"/>
+</svg>

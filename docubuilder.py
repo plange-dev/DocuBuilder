@@ -13,6 +13,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+import urllib.request
 import webbrowser
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -23,9 +26,12 @@ APP_NAME = "DocuBuilder"
 APP_VERSION = "1.0.1.0"
 APP_CHANNEL = "stable"
 APP_TITLE = APP_NAME + (" Nightly" if APP_CHANNEL == "nightly" else "")
+# Update-Funktion erst freischalten, wenn DocuBuilder signiert ausgeliefert wird (siehe CODE_SIGNING.md):
+# unsignierte Updates blockiert Smart App Control.
+UPDATES_ENABLED = False
 
 DEFAULT_SETTINGS = {"theme": "system", "max_items": 20, "files_dir": "", "setup_done": False,
-                    "users": []}
+                    "users": [], "update_check": False}
 ADMIN_NAME = "Admin"                       # festes Konto, kann nicht gelöscht werden
 MIN_PW_LEN = 4
 # Tastenkombinationen, die das Default-Fenster nach der ersten Einrichtung öffnen.
@@ -49,6 +55,16 @@ def app_dir():
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
+
+
+def resource(name):
+    """Mitgelieferte Datei aus assets/ (in der .exe entpackt PyInstaller sie nach _MEIPASS)."""
+    return os.path.join(getattr(sys, "_MEIPASS", None) or app_dir(), "assets", name)
+
+
+# Gleiche ID wie die Verknüpfungen des Installationsprogramms: Windows gruppiert das Fenster
+# dann in der Taskleiste unter dem DocuBuilder-Icon statt unter Python.
+APP_USER_MODEL_ID = "PatrickLange.DocuBuilder"
 
 
 WIN = sys.platform.startswith("win")
@@ -341,13 +357,15 @@ def load_config():
 
 
 def load_prefs(settings):
-    """Übernimmt die persönliche Ansicht des Benutzers in settings."""
+    """Übernimmt die persönlichen Einstellungen (Ansicht, Update-Suche) in settings."""
     try:
-        theme = read_store(PREFS).get("theme")
+        prefs = read_store(PREFS)
+        theme = prefs.get("theme")
     except (OSError, ValueError, AttributeError):
         return
     if theme in ("system", "light", "dark"):
         settings["theme"] = theme
+    settings["update_check"] = bool(prefs.get("update_check", False))
 
 
 def save_config(settings, items):
@@ -439,9 +457,165 @@ def remove_all_data():
 
 def save_prefs(settings):
     try:
-        write_store(PREFS, {"theme": settings["theme"]})
+        write_store(PREFS, {"theme": settings["theme"], "update_check": settings["update_check"]})
     except OSError as e:
         messagebox.showerror(APP_NAME, f"Ansicht konnte nicht gespeichert werden:\n{e}")
+
+
+# ---------------------------------------------------------------- Update
+GITHUB_REPO = "plange-dev/DocuBuilder"
+RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=30"
+RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases"
+DOWNLOAD_PREFIX = f"https://github.com/{GITHUB_REPO}/releases/download/"
+
+
+def parse_version(text):
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)\.(\d+)$", text or "")
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def fmt_version(v):
+    return ".".join(map(str, v))
+
+
+def _http(url, timeout=20):
+    req = urllib.request.Request(url, headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}",
+                                               "Accept": "application/vnd.github+json"})
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def find_update(channel=APP_CHANNEL, current=APP_VERSION, releases=None):
+    """Neuestes Release, das neuer ist als die laufende Version, sonst None.
+    Stable sieht nur Stable-Releases, Nightly zusätzlich die Vorabversionen."""
+    if releases is None:
+        with _http(RELEASES_API) as r:
+            releases = json.loads(r.read().decode("utf-8"))
+    cur = parse_version(current)
+    best = None
+    for rel in releases:
+        if rel.get("draft") or (rel.get("prerelease") and channel != "nightly"):
+            continue
+        v = parse_version(rel.get("tag_name"))
+        if v and v > cur and (best is None or v > best["version"]):
+            best = {"version": v, "nightly": bool(rel.get("prerelease")),
+                    "notes": (rel.get("body") or "").strip(),
+                    "page": rel.get("html_url") or RELEASES_PAGE,
+                    "assets": {a["name"]: a["browser_download_url"] for a in rel.get("assets", [])}}
+    return best
+
+
+def install_mode():
+    """setup: mit dem Installationsprogramm installiert; replace: einzelne Programmdatei;
+    source: als Python-Skript gestartet (kein automatisches Update)."""
+    if not getattr(sys, "frozen", False):
+        return "source"
+    if WIN and os.path.exists(os.path.join(app_dir(), "unins000.exe")):
+        return "setup"
+    return "replace"
+
+
+def update_asset(update, mode):
+    if mode == "setup":
+        return f"DocuBuilder-Setup-{fmt_version(update['version'])}.exe"
+    return "DocuBuilder.exe" if WIN else "DocuBuilder"
+
+
+def download_update(update, name, dest_dir, progress=None):
+    """Lädt eine Datei des Releases und prüft sie gegen <name>.sha256. Liefert den Pfad."""
+    url, sha_url = update["assets"].get(name), update["assets"].get(name + ".sha256")
+    if not url or not sha_url:
+        raise ValueError(f"Im Release fehlt die Datei {name} oder ihre Prüfsumme.")
+    for u in (url, sha_url):
+        if not u.startswith(DOWNLOAD_PREFIX):
+            raise ValueError(f"Unerwartete Download-Adresse:\n{u}")
+    with _http(sha_url) as r:
+        expected = r.read().decode("ascii", "replace").split()[0].lower()
+    path = os.path.join(dest_dir, name)
+    digest = hashlib.sha256()
+    with _http(url, timeout=60) as r, open(path, "wb") as f:
+        total, done = int(r.headers.get("Content-Length") or 0), 0
+        while True:
+            chunk = r.read(256 * 1024)
+            if not chunk:
+                break
+            f.write(chunk)
+            digest.update(chunk)
+            done += len(chunk)
+            if progress:
+                progress(done, total)
+    if digest.hexdigest() != expected:
+        os.remove(path)
+        raise ValueError("Die Prüfsumme der heruntergeladenen Datei stimmt nicht.\n"
+                         "Das Update wurde verworfen.")
+    return path
+
+
+def clean_child_env():
+    """PyInstaller-Variablen entfernen, bevor ein neuer Prozess startet (Setup oder neue .exe).
+    Sonst hält sich das neue DocuBuilder für einen Unterprozess dieser .exe und sucht seine Dateien
+    in deren temporärem Ordner _MEI…, der beim Beenden gelöscht wird („Failed to load Python DLL“)."""
+    mei = os.path.normcase(getattr(sys, "_MEIPASS", "") or "")
+    for key in list(os.environ):
+        value = os.path.normcase(os.environ[key])
+        if key.startswith("_PYI_") or key == "_MEIPASS2" or (mei and value.startswith(mei)):
+            del os.environ[key]
+
+
+def program_pid():
+    """Prozess, der beendet sein muss, bevor die Programmdatei ersetzt werden kann. Bei einer
+    einzelnen PyInstaller-.exe ist das der Startprozess (Elternprozess dieses Python-Prozesses)."""
+    mei = getattr(sys, "_MEIPASS", None)
+    exe_dir = os.path.normcase(os.path.dirname(sys.executable))
+    # Einzeldatei: _MEIPASS ist ein Temp-Ordner. Programmordner (--onedir): _MEIPASS liegt im
+    # Programmordner (_internal), es gibt keinen Startprozess.
+    if getattr(sys, "frozen", False) and mei and not os.path.normcase(mei).startswith(exe_dir):
+        return os.getppid()
+    return os.getpid()
+
+
+def start_setup(path):
+    """Installationsprogramm ohne Rückfragen starten; Windows fragt nach Adminrechten (UAC).
+    /WAITPID: das Setup wartet, bis dieses DocuBuilder beendet ist, bevor es Dateien ersetzt.
+    /UPDATE=1: das Setup startet DocuBuilder danach wieder (siehe installer/DocuBuilder.iss)."""
+    os.startfile(path, "open", "/SILENT /SP- /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS "
+                               f"/UPDATE=1 /WAITPID={program_pid()}")
+
+
+def install_error_text(e):
+    code = getattr(e, "winerror", None)
+    if code == 1223:
+        return "Die Administratorrechte wurden nicht erteilt. Das Update wurde nicht installiert."
+    if code == 4551:                                 # Smart App Control / Anwendungssteuerung
+        return ("Windows hat das Update blockiert (Smart App Control bzw. eine "
+                "Anwendungssteuerungsrichtlinie), weil die Datei nicht digital signiert ist.\n\n"
+                "Bis DocuBuilder signiert ausgeliefert wird, lässt sich das Update nur installieren, "
+                "wenn Smart App Control ausgeschaltet ist (Windows-Sicherheit → App- & "
+                "Browsersteuerung). Das ist eine Sicherheitsentscheidung – im Zweifel bitte die IT fragen.")
+    return f"Das Update konnte nicht installiert werden:\n{e}"
+
+
+def replace_program(exe, new_file):
+    """Laufende Programmdatei austauschen: Windows erlaubt Umbenennen, aber nicht Überschreiben.
+    Die alte Datei (.old) wird beim nächsten Start entfernt."""
+    old = exe + ".old"
+    if os.path.exists(old):
+        os.remove(old)
+    os.replace(exe, old)
+    try:
+        shutil.move(new_file, exe)
+    except OSError:
+        os.replace(old, exe)
+        raise
+    if not WIN:
+        os.chmod(exe, 0o755)
+
+
+def cleanup_old_program():
+    if getattr(sys, "frozen", False):
+        try:
+            os.remove(sys.executable + ".old")
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------- Öffnen
@@ -594,20 +768,17 @@ class Settings(tk.Toplevel):
         outer.pack(fill="both", expand=True)
         outer.rowconfigure(0, weight=1)
         outer.columnconfigure(0, weight=1)
-        nb = ttk.Notebook(outer)
+        self.nb = nb = ttk.Notebook(outer)
         nb.grid(row=0, column=0, sticky="nsew")
         self.tab_items = ttk.Frame(nb, padding=12)
         self.tab_general = ttk.Frame(nb, padding=16)
-        self.tab_info = ttk.Frame(nb, padding=16)
         nb.add(self.tab_items, text="Einträge")
         nb.add(self.tab_general, text="Allgemein")
-        nb.add(self.tab_info, text="Info")
         ttk.Button(outer, text="Schließen", command=self.destroy).grid(
             row=1, column=0, sticky="e", pady=(12, 0))
 
         self.build_items_tab()
         self.build_general_tab()
-        self.build_info_tab()
 
     # ---- Tab Einträge
     def build_items_tab(self):
@@ -754,9 +925,35 @@ class Settings(tk.Toplevel):
                             ("light", "Hell"), ("dark", "Dunkel")):
             ttk.Radiobutton(view, text=text, value=value, variable=self.theme_var,
                             command=self.apply_theme_choice).pack(anchor="w", pady=2)
+        ttk.Button(view, text="Ansicht auf Standard zurücksetzen",
+                   command=self.reset_defaults).pack(anchor="w", pady=(8, 0))
 
-        ttk.Button(f, text="Ansicht auf Standard zurücksetzen", command=self.reset_defaults).grid(
-            row=1, column=0, sticky="w", pady=(18, 0))
+        upd = ttk.LabelFrame(f, text="Updates", padding=12)
+        upd.grid(row=1, column=0, sticky="ew", pady=(14, 0))
+        if UPDATES_ENABLED:
+            self.upd_var = tk.BooleanVar(value=self.app.settings["update_check"])
+            ttk.Checkbutton(upd, text="Beim Anmelden nach Updates suchen (fragt GitHub ab)",
+                            variable=self.upd_var, command=self.apply_update_choice).pack(anchor="w")
+            ttk.Button(upd, text="Jetzt nach Updates suchen …",
+                       command=self.app.open_update).pack(anchor="w", pady=(8, 0))
+        else:
+            ttk.Label(upd, style="Mute.TLabel", wraplength=560, justify="left",
+                      text="Die Update-Funktion wird freigeschaltet, sobald DocuBuilder "
+                           "signiert ausgeliefert wird.").pack(anchor="w")
+
+        if self.app.user["admin"]:
+            box = ttk.LabelFrame(f, text="Daten entfernen (nur Admin)", padding=10)
+            box.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+            ttk.Label(box, style="Mute.TLabel", wraplength=560, justify="left",
+                      text="Löscht alle Einträge, Benutzer und Passwörter dieses Rechners sowie "
+                           "deine Ansicht. Danach wird DocuBuilder beendet und kann gelöscht "
+                           "werden. Windows fragt nach Administratorrechten.").pack(anchor="w")
+            ttk.Button(box, text="DocuBuilder-Daten entfernen …",
+                       command=self.remove_data).pack(anchor="w", pady=(8, 0))
+
+    def apply_update_choice(self):
+        self.app.settings["update_check"] = self.upd_var.get()
+        save_prefs(self.app.settings)
 
     def apply_theme_choice(self):
         self.app.settings["theme"] = self.theme_var.get()
@@ -773,38 +970,7 @@ class Settings(tk.Toplevel):
         self.app.apply_theme()
         self.app.build(force=True)
 
-    # ---- Tab Info
-    def build_info_tab(self):
-        f = self.tab_info
-        f.columnconfigure(1, weight=1)
-        ttk.Label(f, text=APP_NAME, style="Title.TLabel").grid(row=0, column=0, columnspan=2,
-                                                               sticky="w")
-        ttk.Label(f, text="Buttons, die hinterlegte Excel-Listen öffnen.",
-                  style="Mute.TLabel").grid(row=1, column=0, columnspan=2, sticky="w",
-                                            pady=(0, 14))
-        rows = (("Version", APP_VERSION + (" (Nightly)" if APP_CHANNEL == "nightly" else "")),
-                ("Lizenz", "MIT"),
-                ("Konfiguration", CONFIG),
-                ("Angemeldet als", self.app.user["name"] + (
-                    " (Admin)" if self.app.user["admin"] else
-                    " (darf ändern)" if self.app.can_edit else " (nur ansehen)")),
-                ("System", platform.platform()),
-                ("Python", platform.python_version()))
-        for i, (k, v) in enumerate(rows, start=2):
-            ttk.Label(f, text=k + ":", style="Mute.TLabel").grid(row=i, column=0, sticky="nw",
-                                                                 padx=(0, 12), pady=2)
-            ttk.Label(f, text=v, wraplength=480, justify="left").grid(row=i, column=1,
-                                                                       sticky="w", pady=2)
-        if self.app.user["admin"]:
-            box = ttk.LabelFrame(f, text="Daten entfernen", padding=10)
-            box.grid(row=len(rows) + 2, column=0, columnspan=2, sticky="ew", pady=(18, 0))
-            ttk.Label(box, style="Mute.TLabel", wraplength=560, justify="left",
-                      text="Löscht alle Einträge, Benutzer und Passwörter dieses Rechners sowie "
-                           "deine Ansicht. Danach wird DocuBuilder beendet und kann gelöscht "
-                           "werden. Windows fragt nach Administratorrechten.").pack(anchor="w")
-            ttk.Button(box, text="DocuBuilder-Daten entfernen …",
-                       command=self.remove_data).pack(anchor="w", pady=(8, 0))
-
+    # ---- Daten entfernen (nur Admin, im Tab Allgemein)
     def remove_data(self):
         if not messagebox.askyesno(
                 APP_NAME, "Wirklich ALLE DocuBuilder-Daten auf diesem Rechner löschen?\n\n"
@@ -828,6 +994,44 @@ class Settings(tk.Toplevel):
                       "Danach kannst du die Programmdatei löschen.\n\nAndere Windows-Benutzer "
                       "können ihre Ansicht unter %APPDATA%\\DocuBuilder selbst löschen.", parent=self)
         self.app.destroy()
+
+
+# ---------------------------------------------------------------- Info
+class InfoDialog(tk.Toplevel):
+    """Eigenes Fenster „Info zu DocuBuilder“ (aus dem Menü)."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.title("Info zu DocuBuilder")
+        self.resizable(False, False)
+        self.configure(bg=app.pal["bg"])
+        self.transient(app)
+        set_dark_titlebar(self, app.is_dark)
+        self.bind("<Escape>", lambda e: self.destroy())
+
+        f = ttk.Frame(self, padding=20)
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text=APP_NAME, style="Title.TLabel").grid(row=0, column=0, columnspan=2,
+                                                               sticky="w")
+        ttk.Label(f, text="Buttons, die hinterlegte Excel-Listen öffnen.",
+                  style="Mute.TLabel").grid(row=1, column=0, columnspan=2, sticky="w",
+                                            pady=(0, 14))
+        user = app.user
+        rows = (("Version", APP_VERSION + (" (Nightly)" if APP_CHANNEL == "nightly" else "")),
+                ("Lizenz", "MIT"),
+                ("Konfiguration", CONFIG),
+                ("Angemeldet als", user["name"] + (
+                    " (Admin)" if user["admin"] else
+                    " (darf ändern)" if app.can_edit else " (nur ansehen)")),
+                ("System", platform.platform()),
+                ("Python", platform.python_version()))
+        for i, (k, v) in enumerate(rows, start=2):
+            ttk.Label(f, text=k + ":", style="Mute.TLabel").grid(row=i, column=0, sticky="nw",
+                                                                 padx=(0, 12), pady=2)
+            ttk.Label(f, text=v, wraplength=420, justify="left").grid(row=i, column=1,
+                                                                       sticky="w", pady=2)
+        ttk.Button(f, text="Schließen", style="Accent.TButton", command=self.destroy).grid(
+            row=len(rows) + 2, column=0, columnspan=2, sticky="e", pady=(18, 0))
 
 
 # ---------------------------------------------------------------- Default
@@ -1132,12 +1336,226 @@ class DefaultDialog(tk.Toplevel):
                                           f"(im Ordner liegen {total}).", parent=self.app)
 
 
+# ---------------------------------------------------------------- Update-Fenster
+class UpdateDialog(tk.Toplevel):
+    """Sucht nach Updates und installiert sie. Netzwerkzugriffe laufen im Hintergrund."""
+
+    def __init__(self, app, found=None):
+        super().__init__(app)
+        self.app, self.found, self.job, self.progress = app, None, None, (0, 0)
+        p = app.pal
+        self.title("Update")
+        self.minsize(520, 200)                   # Größe richtet sich nach dem Inhalt
+        self.configure(bg=p["bg"])
+        self.transient(app)
+        # Nur modal, wenn es aus den (modalen) Einstellungen kommt; sonst kann man während des
+        # Downloads im Hauptfenster weiterarbeiten.
+        self.modal = app._alive(app.settings_win)
+        if self.modal:
+            self.grab_set()
+        set_dark_titlebar(self, app.is_dark)
+        self.protocol("WM_DELETE_WINDOW", self.close)
+
+        f = ttk.Frame(self, padding=18)
+        f.pack(fill="both", expand=True)
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(2, weight=1)
+        self.head = ttk.Label(f, style="Title.TLabel")
+        self.head.grid(row=0, column=0, sticky="w")
+        self.info = ttk.Label(f, wraplength=530, justify="left")
+        self.info.grid(row=1, column=0, sticky="w", pady=(8, 10))
+        self.notes = tk.Text(f, height=8, wrap="word", relief="flat", bd=0, highlightthickness=1,
+                             bg=p["panel"], fg=p["fg"], highlightbackground=p["line"],
+                             padx=8, pady=6)
+        self.notes.grid(row=2, column=0, sticky="nsew")
+        self.notes.grid_remove()
+        self.bar = ttk.Progressbar(f, length=520)
+        self.bar.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        self.bar.grid_remove()
+        self.btns = ttk.Frame(f)
+        self.btns.grid(row=4, column=0, sticky="e", pady=(14, 0))
+        pending = app.pending_update
+        if pending and os.path.exists(pending["path"]):
+            self.show_ready()                    # schon heruntergeladen: nur noch installieren
+        elif found:
+            self.show_update(found)
+        else:
+            self.check()
+
+    def run(self, work, done):
+        """work() im Hintergrund ausführen, danach done(ergebnis, fehler) im Tk-Thread."""
+        box = {}
+
+        def target():
+            try:
+                box["result"] = work()
+            except Exception as e:  # noqa: BLE001 – Fehler werden im Fenster angezeigt
+                box["error"] = e
+
+        self.job = threading.Thread(target=target, daemon=True)
+        self.job.start()
+
+        def poll():
+            if not self.winfo_exists():
+                return
+            if self.job.is_alive():
+                self.after(100, poll)
+            else:
+                done(box.get("result"), box.get("error"))
+        self.after(100, poll)
+
+    def set_buttons(self, *buttons):
+        """buttons: (Text, Befehl, hervorgehoben)"""
+        for w in self.btns.winfo_children():
+            w.destroy()
+        for text, cmd, accent in buttons:
+            ttk.Button(self.btns, text=text, command=cmd,
+                       style="Accent.TButton" if accent else "TButton").pack(side="left", padx=(6, 0))
+
+    def check(self):
+        self.head.configure(text="Nach Updates suchen")
+        self.info.configure(text="Verbindung zu GitHub …")
+        self.notes.grid_remove()
+        self.bar.configure(mode="indeterminate")
+        self.bar.grid()
+        self.bar.start(12)
+        self.set_buttons(("Schließen", self.close, False))
+        self.run(find_update, self.checked)
+
+    def checked(self, found, error):
+        self.bar.stop()
+        self.bar.grid_remove()
+        if error:
+            self.head.configure(text="Keine Verbindung")
+            self.info.configure(text=f"Die Suche nach Updates ist fehlgeschlagen:\n{error}")
+            self.set_buttons(("Erneut versuchen", self.check, False), ("Schließen", self.close, True))
+        elif not found:
+            channel = " (Nightly)" if APP_CHANNEL == "nightly" else ""
+            self.head.configure(text="DocuBuilder ist aktuell")
+            self.info.configure(text=f"Installiert ist die neueste Version {APP_VERSION}{channel}.")
+            self.set_buttons(("Schließen", self.close, True))
+        else:
+            self.show_update(found)
+
+    def show_update(self, found):
+        self.found = found
+        v = fmt_version(found["version"])
+        mode = install_mode()
+        is_admin_user = bool(self.app.user and self.app.user["admin"])
+        lines = [f"Installiert: {APP_VERSION}   →   neu: {v}" + (" (Nightly)" if found["nightly"] else "")]
+        if mode == "source":
+            lines.append("DocuBuilder läuft als Python-Skript. Bitte die neue Version über die "
+                         "Release-Seite holen.")
+        elif not is_admin_user:
+            lines.append(f"Installieren darf nur der {ADMIN_NAME}.")
+        else:
+            lines.append("Das Update wird zuerst heruntergeladen und geprüft. Zum Installieren muss "
+                         "DocuBuilder danach geschlossen werden.")
+        self.head.configure(text=f"Version {v} ist verfügbar")
+        self.info.configure(text="\n\n".join(lines))
+        if found["notes"]:
+            self.notes.configure(state="normal")
+            self.notes.delete("1.0", "end")
+            self.notes.insert("1.0", found["notes"])
+            self.notes.configure(state="disabled")
+            self.notes.grid()
+        buttons = [("Release-Seite", lambda: webbrowser.open(found["page"]), False),
+                   ("Später", self.close, False)]
+        if mode != "source" and is_admin_user:
+            buttons.append(("Herunterladen", self.download, True))
+        self.set_buttons(*buttons)
+
+    def download(self):
+        mode = install_mode()
+        name = update_asset(self.found, mode)
+        self.head.configure(text="Update wird heruntergeladen")
+        self.info.configure(text=name)
+        self.notes.grid_remove()
+        self.bar.configure(mode="determinate", maximum=100, value=0)
+        self.bar.grid()
+        self.set_buttons()
+        self.progress = (0, 0)
+
+        def progress(done, total):               # läuft im Hintergrund-Thread: nur Werte merken
+            self.progress = (done, total)
+
+        tmp = tempfile.mkdtemp(prefix="docubuilder-update-")
+        self.run(lambda: download_update(self.found, name, tmp, progress),
+                 lambda path, error: self.downloaded(path, error, mode))
+        self.tick(name)
+
+    def tick(self, name):
+        if not self.winfo_exists() or not self.job.is_alive():
+            return
+        done, total = self.progress
+        if total:
+            self.bar.configure(value=done * 100 / total)
+            self.info.configure(text=f"{name}\n{done / 1e6:.1f} von {total / 1e6:.1f} MB")
+        self.after(150, lambda: self.tick(name))
+
+    def downloaded(self, path, error, mode):
+        if error:
+            self.bar.grid_remove()
+            self.head.configure(text="Download fehlgeschlagen")
+            self.info.configure(text=str(error))
+            self.set_buttons(("Erneut versuchen", self.download, False), ("Schließen", self.close, True))
+            return
+        self.app.pending_update = {"version": self.found["version"], "path": path, "mode": mode}
+        self.show_ready()
+
+    def show_ready(self):
+        """Heruntergeladen und geprüft: Installation erst nach dem Schließen von DocuBuilder."""
+        pending = self.app.pending_update
+        v = fmt_version(pending["version"])
+        self.bar.grid_remove()
+        self.notes.grid_remove()
+        self.head.configure(text=f"Update {v} ist bereit")
+        uac = " Windows fragt dabei nach Administratorrechten." if pending["mode"] == "setup" else ""
+        self.info.configure(text=(
+            "Das Update wurde heruntergeladen, die Prüfsumme ist korrekt.\n\n"
+            f"Zum Installieren muss DocuBuilder geschlossen werden.{uac} Danach startet DocuBuilder "
+            "automatisch neu.\n\n"
+            "Du kannst auch später installieren – beim Beenden von DocuBuilder wirst du noch einmal "
+            "gefragt."))
+        self.set_buttons(("Später", self.close, False),
+                         ("DocuBuilder schließen und installieren", self.install_now, True))
+
+    def install_now(self):
+        v = fmt_version(self.app.pending_update["version"])
+        if not messagebox.askokcancel(
+                "Update installieren",
+                f"DocuBuilder wird jetzt geschlossen, damit Version {v} installiert werden kann.\n\n"
+                "Bitte vorher offene Eingaben abschließen. DocuBuilder startet nach dem Update "
+                "automatisch neu.", icon="warning", parent=self):
+            return
+        try:
+            self.app.install_update()
+        except OSError as e:
+            self.head.configure(text="Update nicht installiert")
+            self.info.configure(text=install_error_text(e))
+            self.set_buttons(("Erneut versuchen", self.install_now, False), ("Schließen", self.close, True))
+
+    def close(self):
+        if self.modal:
+            self.grab_release()
+        self.destroy()
+        if self.app._alive(self.app.settings_win):
+            self.app.settings_win.grab_set()     # Einstellungen waren vorher modal
+
+
 # ---------------------------------------------------------------- Hauptfenster
 class App(tk.Tk):
     TILE_W = 220
 
     def __init__(self):
+        if WIN:
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+            except Exception:  # noqa: BLE001
+                pass
         super().__init__()
+        self.set_icon()
         self.title(APP_TITLE)
         self.geometry("720x420")
         self.minsize(360, 240)
@@ -1147,6 +1565,11 @@ class App(tk.Tk):
         self.user = None                         # angemeldeter Benutzer (dict aus settings["users"])
         self.settings_win = None
         self.default_win = None
+        self.update_win = None
+        self.info_win = None
+        self.pending_update = None               # heruntergeladenes, geprüftes Update (wartet aufs Schließen)
+        self.protocol("WM_DELETE_WINDOW", self.quit_app)
+        self._update_checked = False            # automatische Suche nur einmal je Programmstart
         self.ui_font = tkfont.nametofont("TkDefaultFont").actual("family")
         self.pal = PALETTES["light"]
         self.is_dark = False
@@ -1156,6 +1579,8 @@ class App(tk.Tk):
         top.pack(fill="x")
         ttk.Label(top, text=APP_NAME, style="Title.TLabel").pack(side="left")
         self.session = ttk.Frame(top)            # nur sichtbar, wenn jemand angemeldet ist
+        self.menu_btn = ttk.Button(self.session, text="Menü ▾", command=self.show_menu)
+        self.menu_btn.pack(side="right", padx=(6, 0))
         ttk.Button(self.session, text="Einstellungen", command=self.open_settings).pack(side="right")
         ttk.Button(self.session, text="Abmelden", command=self.logout).pack(side="right", padx=6)
         self.who = ttk.Label(self.session, style="Mute.TLabel")
@@ -1169,6 +1594,17 @@ class App(tk.Tk):
         for key in DEFAULT_SHORTCUTS:
             self.bind_all(key, lambda e: self.open_default() or "break")
         self.after(200, self.startup)
+
+    def set_icon(self):
+        """Fenster- und Taskleisten-Icon, gilt auch für alle Dialoge."""
+        try:
+            if WIN:
+                self.iconbitmap(default=resource("docubuilder.ico"))
+            else:
+                self._icon = tk.PhotoImage(file=resource("docubuilder.png"))
+                self.iconphoto(True, self._icon)
+        except (tk.TclError, OSError):
+            pass
 
     @property
     def can_edit(self):
@@ -1202,7 +1638,7 @@ class App(tk.Tk):
         return outer
 
     def show_login(self, msg=""):
-        for win in (self.settings_win, self.default_win):
+        for win in (self.settings_win, self.default_win, self.update_win, self.info_win):
             if self._alive(win):
                 win.destroy()
         self.user = None
@@ -1240,6 +1676,29 @@ class App(tk.Tk):
         self.area.pack(fill="both", expand=True)
         self.apply_theme()
         self.build(force=True)
+        if UPDATES_ENABLED and self.settings["update_check"] and not self._update_checked:
+            self._update_checked = True
+            self.auto_check_updates()
+
+    def auto_check_updates(self):
+        """Stille Suche im Hintergrund; meldet sich nur, wenn es ein Update gibt."""
+        box = {}
+
+        def target():
+            try:
+                box["found"] = find_update()
+            except Exception:  # noqa: BLE001 – ohne Netz einfach nichts melden
+                pass
+
+        job = threading.Thread(target=target, daemon=True)
+        job.start()
+
+        def poll():
+            if job.is_alive():
+                self.after(500, poll)
+            elif box.get("found") and self.user and not self._alive(self.update_win):
+                self.open_update(box["found"])
+        self.after(500, poll)
 
     def logout(self):
         self.login_name.set("")
@@ -1252,14 +1711,91 @@ class App(tk.Tk):
                       "Danach startet DocuBuilder mit der Ersteinrichtung.", parent=self)
         self.destroy()
 
+    # ---- Menü (Knopf oben rechts)
+    def menu_entries(self):
+        """Einträge des Menüs: (Text, Befehl) oder None für eine Trennlinie.
+        Befehl None = noch nicht verfügbar (wird ausgegraut angezeigt)."""
+        return [
+            ("Nach Updates suchen …", self.open_update if UPDATES_ENABLED else None),
+            None,
+            ("Info zu DocuBuilder", self.open_info),
+            None,
+            ("Beenden", self.quit_app),
+        ]
+
+    def show_menu(self):
+        p = self.pal
+        menu = tk.Menu(self, tearoff=False, bg=p["panel"], fg=p["fg"], activebackground=p["accent"],
+                       activeforeground=p["accent_fg"], disabledforeground=p["mute"])
+        for entry in self.menu_entries():
+            if entry is None:
+                menu.add_separator()
+            else:
+                text, cmd = entry
+                menu.add_command(label=text, command=cmd, state="normal" if cmd else "disabled")
+        b = self.menu_btn
+        menu.update_idletasks()
+        x = b.winfo_rootx() + b.winfo_width() - menu.winfo_reqwidth()   # rechtsbündig zum Knopf
+        try:
+            menu.tk_popup(max(x, 0), b.winfo_rooty() + b.winfo_height())
+        finally:
+            menu.grab_release()
+
+    # ---- Update installieren / Beenden
+    def install_update(self):
+        """Heruntergeladenes Update installieren. DocuBuilder wird dafür beendet; das Setup wartet,
+        bis der Prozess weg ist. Wirft OSError, wenn Windows den Start verweigert."""
+        pending = self.pending_update
+        clean_child_env()
+        if pending["mode"] == "setup":
+            start_setup(pending["path"])
+        else:
+            replace_program(sys.executable, pending["path"])
+            subprocess.Popen([sys.executable])
+        self.pending_update = None
+        self.destroy()
+
+    def quit_app(self):
+        """Beenden; liegt ein heruntergeladenes Update bereit, wird angeboten, es jetzt zu installieren."""
+        pending = self.pending_update
+        if pending and os.path.exists(pending["path"]):
+            answer = messagebox.askyesnocancel(
+                APP_NAME, f"Das Update auf Version {fmt_version(pending['version'])} ist heruntergeladen "
+                          "und bereit.\n\nJetzt installieren? DocuBuilder wird dafür geschlossen und "
+                          "startet danach neu.\n\nJa = installieren · Nein = ohne Update beenden",
+                parent=self)
+            if answer is None:
+                return
+            if answer:
+                try:
+                    self.install_update()
+                except OSError as e:
+                    messagebox.showerror(APP_NAME, install_error_text(e), parent=self)
+                return
+        self.destroy()
+
     # ---- Fenster
+    def open_update(self, found=None):
+        if not self.user or self._alive(self.default_win):
+            return
+        if self._alive(self.update_win):
+            self.update_win.lift()
+            return
+        self.update_win = UpdateDialog(self, found)
+
     def open_settings(self):
         if not self.user or self._alive(self.default_win):
             return
-        if self._alive(self.settings_win):
-            self.settings_win.lift()
+        if not self._alive(self.settings_win):
+            self.settings_win = Settings(self)
+        self.settings_win.lift()
+
+    def open_info(self):
+        if not self.user:
             return
-        self.settings_win = Settings(self)
+        if not self._alive(self.info_win):
+            self.info_win = InfoDialog(self)
+        self.info_win.lift()
 
     def open_default(self, first_run=False):
         if self._alive(self.settings_win):
@@ -1276,6 +1812,7 @@ class App(tk.Tk):
         self.default_win = DefaultDialog(self, first_run=first_run)
 
     def startup(self):
+        cleanup_old_program()                    # Reste eines Updates der einzelnen .exe
         if STATE["error"]:
             return self.locked()
         if has_admin(self.settings):

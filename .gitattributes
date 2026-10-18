@@ -1,0 +1,6 @@
+# Windows-Batchdateien brauchen CRLF (sonst funktionieren Sprungmarken nicht zuverlässig)
+*.bat eol=crlf
+*.iss eol=crlf
+# Binärdateien nie umwandeln
+*.ico binary
+*.png binary
