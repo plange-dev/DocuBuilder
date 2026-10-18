@@ -70,6 +70,8 @@ Unter **Releases** liegen `DocuBuilder.exe` (Windows) und `DocuBuilder` (Linux).
 Alternativ gibt es weiterhin die einzelne `DocuBuilder.exe` ohne Installation.
 
 ## Updates
+> **Hinweis:** Die Update-Funktion ist vorerst abgeschaltet (*Menü → Nach Updates suchen* ist ausgegraut). Sie wird freigeschaltet, sobald DocuBuilder signiert ausgeliefert wird, weil Smart App Control unsignierte Updates blockiert. Bis dahin neue Versionen über das Setup aus den [Releases](https://github.com/plange-dev/DocuBuilder/releases) installieren.
+
 **Menü → Nach Updates suchen …** (oder *Einstellungen → Allgemein → Jetzt nach Updates suchen*) fragt die Releases auf GitHub ab:
 - Eine **Stable**-Version sucht nur Stable-Releases, eine **Nightly**-Version zusätzlich die Vorabversionen.
 - Gibt es eine neuere Version, zeigt das Fenster die Änderungen. Das Update läuft in zwei Schritten (nur für den **Admin**):

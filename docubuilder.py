@@ -26,6 +26,9 @@ APP_NAME = "DocuBuilder"
 APP_VERSION = "1.0.1.0"
 APP_CHANNEL = "stable"
 APP_TITLE = APP_NAME + (" Nightly" if APP_CHANNEL == "nightly" else "")
+# Update-Funktion erst freischalten, wenn DocuBuilder signiert ausgeliefert wird (siehe CODE_SIGNING.md):
+# unsignierte Updates blockiert Smart App Control.
+UPDATES_ENABLED = False
 
 DEFAULT_SETTINGS = {"theme": "system", "max_items": 20, "files_dir": "", "setup_done": False,
                     "users": [], "update_check": False}
@@ -927,11 +930,16 @@ class Settings(tk.Toplevel):
 
         upd = ttk.LabelFrame(f, text="Updates", padding=12)
         upd.grid(row=1, column=0, sticky="ew", pady=(14, 0))
-        self.upd_var = tk.BooleanVar(value=self.app.settings["update_check"])
-        ttk.Checkbutton(upd, text="Beim Anmelden nach Updates suchen (fragt GitHub ab)",
-                        variable=self.upd_var, command=self.apply_update_choice).pack(anchor="w")
-        ttk.Button(upd, text="Jetzt nach Updates suchen …",
-                   command=self.app.open_update).pack(anchor="w", pady=(8, 0))
+        if UPDATES_ENABLED:
+            self.upd_var = tk.BooleanVar(value=self.app.settings["update_check"])
+            ttk.Checkbutton(upd, text="Beim Anmelden nach Updates suchen (fragt GitHub ab)",
+                            variable=self.upd_var, command=self.apply_update_choice).pack(anchor="w")
+            ttk.Button(upd, text="Jetzt nach Updates suchen …",
+                       command=self.app.open_update).pack(anchor="w", pady=(8, 0))
+        else:
+            ttk.Label(upd, style="Mute.TLabel", wraplength=560, justify="left",
+                      text="Die Update-Funktion wird freigeschaltet, sobald DocuBuilder "
+                           "signiert ausgeliefert wird.").pack(anchor="w")
 
         if self.app.user["admin"]:
             box = ttk.LabelFrame(f, text="Daten entfernen (nur Admin)", padding=10)
@@ -1668,7 +1676,7 @@ class App(tk.Tk):
         self.area.pack(fill="both", expand=True)
         self.apply_theme()
         self.build(force=True)
-        if self.settings["update_check"] and not self._update_checked:
+        if UPDATES_ENABLED and self.settings["update_check"] and not self._update_checked:
             self._update_checked = True
             self.auto_check_updates()
 
@@ -1708,7 +1716,7 @@ class App(tk.Tk):
         """Einträge des Menüs: (Text, Befehl) oder None für eine Trennlinie.
         Befehl None = noch nicht verfügbar (wird ausgegraut angezeigt)."""
         return [
-            ("Nach Updates suchen …", self.open_update),
+            ("Nach Updates suchen …", self.open_update if UPDATES_ENABLED else None),
             None,
             ("Info zu DocuBuilder", self.open_info),
             None,
