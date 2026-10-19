@@ -2,8 +2,8 @@
 # Versionsinformationen der .exe (werden von SmartScreen und SignPath angezeigt/geprüft)
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 1, 0),
-    prodvers=(1, 0, 1, 0),
+    filevers=(1, 1, 0, 0),
+    prodvers=(1, 1, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -16,12 +16,12 @@ VSVersionInfo(
       StringTable('040704B0', [
         StringStruct('CompanyName', 'Patrick Lange'),
         StringStruct('FileDescription', 'DocuBuilder'),
-        StringStruct('FileVersion', '1.0.1.0'),
+        StringStruct('FileVersion', '1.1.0.0'),
         StringStruct('InternalName', 'DocuBuilder'),
         StringStruct('LegalCopyright', 'MIT License'),
         StringStruct('OriginalFilename', 'DocuBuilder.exe'),
         StringStruct('ProductName', 'DocuBuilder'),
-        StringStruct('ProductVersion', '1.0.1.0')
+        StringStruct('ProductVersion', '1.1.0.0')
       ])
     ]),
     VarFileInfo([VarStruct('Translation', [1031, 1200])])
