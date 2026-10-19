@@ -30,7 +30,14 @@ jobs:
           python-version: "3.12"
       - name: Nightly-Version berechnen
         id: v
-        run: echo "version=$(python tools/version.py nightly)" >> "$GITHUB_OUTPUT"
+        run: |
+          v=$(python tools/version.py nightly)
+          # Nie ein bestehendes Release überschreiben (z. B. wenn main nicht in nightly übernommen wurde)
+          if git ls-remote --exit-code --tags origin "refs/tags/nightly-v$v" >/dev/null; then
+            echo "::error::nightly-v$v gibt es schon. Ist main (neue Stable-Version) in nightly übernommen?"
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
 
   build:
     needs: version

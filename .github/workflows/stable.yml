@@ -82,6 +82,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main   # enthält den Versions-Commit aus dem Job "version"
           if git ls-remote --exit-code --heads origin nightly >/dev/null; then
             git checkout -B nightly origin/nightly
             git merge --no-edit origin/main -m "main (Version ${{ needs.version.outputs.version }}) in nightly übernommen"
