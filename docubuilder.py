@@ -30,8 +30,6 @@ APP_TITLE = APP_NAME + (" Nightly" if APP_CHANNEL == "nightly" else "")
 # unsignierte Updates blockiert Smart App Control.
 UPDATES_ENABLED = False
 
-DEFAULT_SETTINGS = {"theme": "system", "max_items": 20, "files_dir": "", "setup_done": False,
-                    "users": [], "update_check": False}
 ADMIN_NAME = "Admin"                       # festes Konto, kann nicht gelöscht werden
 MIN_PW_LEN = 4
 # Tastenkombinationen, die das Default-Fenster nach der ersten Einrichtung öffnen.
@@ -40,14 +38,43 @@ DEFAULT_SHORTCUTS = ("<Alt-F11>", "<Control-Shift-F11>")
 EXCEL_EXT = (".xlsx", ".xlsm", ".xls", ".xlsb", ".csv", ".ods")
 MAX_ITEMS_LIMIT = 200
 
-PALETTES = {
-    "light": dict(bg="#f3f4f2", fg="#1d2a24", panel="#ffffff", accent="#1f6b4a",
-                  accent_fg="#ffffff", line="#c9d0cb", mute="#66736c",
-                  btn="#e9ede9", btn_hover="#dbe6df"),
-    "dark": dict(bg="#171c19", fg="#e6ece8", panel="#212925", accent="#4fb283",
-                 accent_fg="#0e1612", line="#35413b", mute="#93a299",
-                 btn="#2a342f", btn_hover="#34423b"),
+# Farbschemata nach den Farben des Icons (Blau #3654E8, Dunkelblau #1F2A44, Orange #FFB020).
+# Jedes Schema hat eine helle und eine dunkle Palette. Ein neues Schema ist ein neuer Eintrag in
+# COLOR_SCHEMES; DEFAULT_SCHEME legt fest, was gilt, solange ein Benutzer nichts anderes wählt.
+# Optionale Schlüssel: primary/primary_fg (Hauptknöpfe wie "Anmelden"), title (Programmtitel).
+BRAND = {
+    "light": dict(bg="#F4F6FB", fg="#1F2A44", panel="#FFFFFF", line="#C5CDE0", mute="#56607A",
+                  btn="#E6EAF5", btn_hover="#D9E0FC", disabled="#98A1B6", tab="#E2E7F3",
+                  accent="#3654E8", accent_fg="#FFFFFF"),
+    "dark": dict(bg="#141B2C", fg="#EEF1F8", panel="#1F2A44", line="#46557E", mute="#AFB9D2",
+                 btn="#29355A", btn_hover="#354471", disabled="#6F7A98", tab="#1A2338",
+                 accent="#6F86FF", accent_fg="#0E1426"),
 }
+
+
+def _scheme(light=None, dark=None, base=BRAND):
+    return {"light": dict(base["light"], **(light or {})), "dark": dict(base["dark"], **(dark or {}))}
+
+
+ORANGE = dict(primary="#FFB020", primary_fg="#1F2A44")
+COLOR_SCHEMES = {
+    "blau_orange": ("Blau mit orangem Hauptknopf", _scheme(ORANGE, ORANGE)),
+    "blau": ("Blau", _scheme()),
+    "orange": ("Orange", _scheme(dict(accent="#FFB020", accent_fg="#1F2A44", title="#3654E8",
+                                      btn_hover="#FFEBC2"),
+                                 dict(accent="#FFB020", accent_fg="#1F2A44", title="#8DA0FF"))),
+    "gruen": ("Grün (bis Version 1.1)", {
+        "light": dict(bg="#f3f4f2", fg="#1d2a24", panel="#ffffff", accent="#1f6b4a",
+                      accent_fg="#ffffff", line="#b4beb8", mute="#5c6962",
+                      btn="#e4e9e5", btn_hover="#d3e2d8", disabled="#8f9a94", tab="#dde3df"),
+        "dark": dict(bg="#1a201d", fg="#f0f4f1", panel="#29332e", accent="#5cc493",
+                     accent_fg="#0b130f", line="#56685e", mute="#b3c2ba",
+                     btn="#34413a", btn_hover="#435249", disabled="#7f8e86", tab="#2e3833")}),
+}
+DEFAULT_SCHEME = "blau_orange"
+
+DEFAULT_SETTINGS = {"theme": "system", "scheme": DEFAULT_SCHEME, "max_items": 20, "files_dir": "",
+                    "setup_done": False, "users": [], "update_check": False}
 
 
 # ---------------------------------------------------------------- Konfiguration
@@ -357,7 +384,7 @@ def load_config():
 
 
 def load_prefs(settings):
-    """Übernimmt die persönlichen Einstellungen (Ansicht, Update-Suche) in settings."""
+    """Übernimmt die persönlichen Einstellungen (Ansicht, Farbschema, Update-Suche) in settings."""
     try:
         prefs = read_store(PREFS)
         theme = prefs.get("theme")
@@ -365,6 +392,8 @@ def load_prefs(settings):
         return
     if theme in ("system", "light", "dark"):
         settings["theme"] = theme
+    if prefs.get("scheme") in COLOR_SCHEMES:
+        settings["scheme"] = prefs["scheme"]
     settings["update_check"] = bool(prefs.get("update_check", False))
 
 
@@ -457,7 +486,8 @@ def remove_all_data():
 
 def save_prefs(settings):
     try:
-        write_store(PREFS, {"theme": settings["theme"], "update_check": settings["update_check"]})
+        write_store(PREFS, {"theme": settings["theme"], "scheme": settings["scheme"],
+                            "update_check": settings["update_check"]})
     except OSError as e:
         messagebox.showerror(APP_NAME, f"Ansicht konnte nicht gespeichert werden:\n{e}")
 
@@ -716,39 +746,72 @@ def setup_style(root, p):
     s = ttk.Style(root)
     s.theme_use("clam")
     root.configure(bg=p["bg"])
+    # Hover-, Druck- und Sperrzustände explizit setzen: "clam" färbt sie sonst hellgrau,
+    # was im Dunkelmodus kaum lesbar ist.
+    dis = [("disabled", p["disabled"])]
     s.configure(".", background=p["bg"], foreground=p["fg"], fieldbackground=p["panel"],
                 bordercolor=p["line"], lightcolor=p["line"], darkcolor=p["line"],
-                troughcolor=p["bg"], focuscolor=p["accent"])
+                troughcolor=p["bg"], focuscolor=p["accent"], selectbackground=p["accent"],
+                selectforeground=p["accent_fg"], insertcolor=p["fg"])
+    s.map(".", foreground=dis)
     s.configure("TFrame", background=p["bg"])
     s.configure("TLabel", background=p["bg"], foreground=p["fg"])
     s.configure("Mute.TLabel", foreground=p["mute"])
-    s.configure("Title.TLabel", font=(None, 15, "bold"))
+    s.configure("Title.TLabel", font=(None, 15, "bold"), foreground=p.get("title", p["fg"]))
     s.configure("TLabelframe", background=p["bg"], bordercolor=p["line"])
     s.configure("TLabelframe.Label", background=p["bg"], foreground=p["fg"])
     s.configure("TButton", background=p["btn"], foreground=p["fg"], bordercolor=p["line"],
-                padding=(10, 5))
-    s.map("TButton", background=[("active", p["btn_hover"])])
-    s.configure("Accent.TButton", background=p["accent"], foreground=p["accent_fg"])
-    s.map("Accent.TButton", background=[("active", p["accent"])])
-    s.configure("TEntry", fieldbackground=p["panel"], foreground=p["fg"], insertcolor=p["fg"])
-    s.configure("TSpinbox", fieldbackground=p["panel"], foreground=p["fg"], background=p["btn"],
-                arrowcolor=p["fg"], insertcolor=p["fg"])
-    s.configure("TRadiobutton", background=p["bg"], foreground=p["fg"], indicatorcolor=p["panel"])
-    s.map("TRadiobutton", background=[("active", p["bg"])],
-          indicatorcolor=[("selected", p["accent"])])
-    s.configure("TCheckbutton", background=p["bg"], foreground=p["fg"], indicatorcolor=p["panel"])
-    s.map("TCheckbutton", background=[("active", p["bg"])],
-          indicatorcolor=[("selected", p["accent"])])
-    s.configure("TNotebook", background=p["bg"], bordercolor=p["line"])
-    s.configure("TNotebook.Tab", background=p["btn"], foreground=p["fg"], padding=(14, 6))
-    s.map("TNotebook.Tab", background=[("selected", p["panel"])])
+                lightcolor=p["btn"], darkcolor=p["btn"], padding=(10, 5))
+    s.map("TButton", foreground=dis,
+          background=[("disabled", p["bg"]), ("pressed", p["btn_hover"]), ("active", p["btn_hover"])],
+          bordercolor=[("focus", p["accent"])],
+          lightcolor=[("disabled", p["bg"]), ("active", p["btn_hover"])],
+          darkcolor=[("disabled", p["bg"]), ("active", p["btn_hover"])])
+    # Hauptknopf (z. B. "Anmelden"); eigene Farbe optional, sonst die Akzentfarbe
+    prim, prim_fg = p.get("primary", p["accent"]), p.get("primary_fg", p["accent_fg"])
+    s.configure("Accent.TButton", background=prim, foreground=prim_fg,
+                bordercolor=prim, lightcolor=prim, darkcolor=prim)
+    s.map("Accent.TButton", foreground=dis,
+          background=[("disabled", p["btn"]), ("active", prim)],
+          lightcolor=[("disabled", p["btn"]), ("active", prim)],
+          darkcolor=[("disabled", p["btn"]), ("active", prim)])
+    field = dict(fieldbackground=p["panel"], foreground=p["fg"], insertcolor=p["fg"],
+                 bordercolor=p["line"], lightcolor=p["panel"], darkcolor=p["panel"],
+                 selectbackground=p["accent"], selectforeground=p["accent_fg"])
+    field_map = dict(foreground=dis, fieldbackground=[("disabled", p["bg"]), ("readonly", p["bg"])],
+                     bordercolor=[("focus", p["accent"])], lightcolor=[("focus", p["accent"])])
+    s.configure("TEntry", **field)
+    s.map("TEntry", **field_map)
+    s.configure("TSpinbox", background=p["btn"], arrowcolor=p["fg"], **field)
+    s.map("TSpinbox", background=[("active", p["btn_hover"])], arrowcolor=dis, **field_map)
+    for kind in ("TRadiobutton", "TCheckbutton"):
+        s.configure(kind, background=p["bg"], foreground=p["fg"], indicatorbackground=p["panel"],
+                    indicatorforeground=p["accent_fg"], upperbordercolor=p["line"],
+                    lowerbordercolor=p["line"])
+        s.map(kind, background=[("active", p["bg"])], foreground=dis,
+              indicatorbackground=[("disabled", p["bg"]), ("selected", p["accent"]),
+                                   ("pressed", p["btn_hover"])],
+              upperbordercolor=[("selected", p["accent"]), ("active", p["accent"])],
+              lowerbordercolor=[("selected", p["accent"]), ("active", p["accent"])])
+    s.configure("TNotebook", background=p["bg"], bordercolor=p["line"],
+                lightcolor=p["panel"], darkcolor=p["line"])
+    s.configure("TNotebook.Tab", background=p["tab"], foreground=p["mute"], bordercolor=p["line"],
+                lightcolor=p["tab"], padding=(14, 6))
+    s.map("TNotebook.Tab", background=[("selected", p["bg"]), ("active", p["btn_hover"])],
+          foreground=[("selected", p["fg"]), ("active", p["fg"])],
+          lightcolor=[("selected", p["accent"])])
     s.configure("Treeview", background=p["panel"], fieldbackground=p["panel"],
-                foreground=p["fg"], rowheight=26)
+                foreground=p["fg"], bordercolor=p["line"], rowheight=26)
     s.map("Treeview", background=[("selected", p["accent"])],
           foreground=[("selected", p["accent_fg"])])
-    s.configure("Treeview.Heading", background=p["btn"], foreground=p["fg"])
+    s.configure("Treeview.Heading", background=p["btn"], foreground=p["fg"], bordercolor=p["line"],
+                lightcolor=p["btn"], darkcolor=p["btn"])
+    s.map("Treeview.Heading", background=[("active", p["btn_hover"])],
+          lightcolor=[("active", p["btn_hover"])], darkcolor=[("active", p["btn_hover"])])
     s.configure("TScrollbar", background=p["btn"], troughcolor=p["bg"], arrowcolor=p["fg"],
-                bordercolor=p["line"])
+                bordercolor=p["line"], lightcolor=p["btn"], darkcolor=p["btn"])
+    s.map("TScrollbar", background=[("pressed", p["accent"]), ("active", p["btn_hover"])],
+          arrowcolor=dis)
 
 
 # ---------------------------------------------------------------- Einstellungen
@@ -920,13 +983,25 @@ class Settings(tk.Toplevel):
 
         view = ttk.LabelFrame(f, text="Ansicht", padding=12)
         view.grid(row=0, column=0, sticky="ew")
+        view.columnconfigure(1, weight=1)
+        modes = ttk.Frame(view)
+        modes.grid(row=0, column=0, sticky="nw", padx=(0, 40))
+        ttk.Label(modes, text="Hell / Dunkel", style="Mute.TLabel").pack(anchor="w", pady=(0, 2))
         self.theme_var = tk.StringVar(value=self.app.settings["theme"])
         for value, text in (("system", "An das System anpassen"),
                             ("light", "Hell"), ("dark", "Dunkel")):
-            ttk.Radiobutton(view, text=text, value=value, variable=self.theme_var,
+            ttk.Radiobutton(modes, text=text, value=value, variable=self.theme_var,
+                            command=self.apply_theme_choice).pack(anchor="w", pady=2)
+        schemes = ttk.Frame(view)
+        schemes.grid(row=0, column=1, sticky="nw")
+        ttk.Label(schemes, text="Farbschema", style="Mute.TLabel").pack(anchor="w", pady=(0, 2))
+        self.scheme_var = tk.StringVar(value=self.app.settings["scheme"])
+        for value, (text, _) in COLOR_SCHEMES.items():
+            ttk.Radiobutton(schemes, text=text + (" (Standard)" if value == DEFAULT_SCHEME else ""),
+                            value=value, variable=self.scheme_var,
                             command=self.apply_theme_choice).pack(anchor="w", pady=2)
         ttk.Button(view, text="Ansicht auf Standard zurücksetzen",
-                   command=self.reset_defaults).pack(anchor="w", pady=(8, 0))
+                   command=self.reset_defaults).grid(row=1, column=0, sticky="w", pady=(8, 0))
 
         upd = ttk.LabelFrame(f, text="Updates", padding=12)
         upd.grid(row=1, column=0, sticky="ew", pady=(14, 0))
@@ -957,6 +1032,7 @@ class Settings(tk.Toplevel):
 
     def apply_theme_choice(self):
         self.app.settings["theme"] = self.theme_var.get()
+        self.app.settings["scheme"] = self.scheme_var.get()
         save_prefs(self.app.settings)
         self.app.apply_theme()
         self.app.build(force=True)
@@ -965,7 +1041,9 @@ class Settings(tk.Toplevel):
         if not messagebox.askyesno(APP_NAME, "Ansicht auf Standard zurücksetzen?", parent=self):
             return
         self.app.settings["theme"] = DEFAULT_SETTINGS["theme"]
+        self.app.settings["scheme"] = DEFAULT_SETTINGS["scheme"]
         self.theme_var.set(self.app.settings["theme"])
+        self.scheme_var.set(self.app.settings["scheme"])
         save_prefs(self.app.settings)
         self.app.apply_theme()
         self.app.build(force=True)
@@ -1571,7 +1649,7 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.quit_app)
         self._update_checked = False            # automatische Suche nur einmal je Programmstart
         self.ui_font = tkfont.nametofont("TkDefaultFont").actual("family")
-        self.pal = PALETTES["light"]
+        self.pal = COLOR_SCHEMES[DEFAULT_SCHEME][1]["light"]
         self.is_dark = False
         self.apply_theme()
 
@@ -1732,7 +1810,13 @@ class App(tk.Tk):
                 menu.add_separator()
             else:
                 text, cmd = entry
-                menu.add_command(label=text, command=cmd, state="normal" if cmd else "disabled")
+                if cmd:
+                    menu.add_command(label=text, command=cmd)
+                else:
+                    # Nicht verfügbar: selbst grau zeichnen. Windows zeichnet gesperrte Einträge
+                    # mit hellem Prägeeffekt, der im Dunkelmodus wie hervorgehoben wirkt.
+                    menu.add_command(label=text, foreground=p["disabled"],
+                                     activeforeground=p["disabled"], activebackground=p["panel"])
         b = self.menu_btn
         menu.update_idletasks()
         x = b.winfo_rootx() + b.winfo_width() - menu.winfo_reqwidth()   # rechtsbündig zum Knopf
@@ -1841,7 +1925,8 @@ class App(tk.Tk):
         mode = self.settings["theme"]
         effective = detect_system_theme() if mode == "system" else mode
         self.is_dark = effective == "dark"
-        self.pal = PALETTES[effective]
+        scheme = COLOR_SCHEMES.get(self.settings["scheme"], COLOR_SCHEMES[DEFAULT_SCHEME])
+        self.pal = scheme[1][effective]
         setup_style(self, self.pal)
         set_dark_titlebar(self, self.is_dark)
         for w in self.winfo_children():

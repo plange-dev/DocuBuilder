@@ -37,6 +37,8 @@ SetupIconFile=..\assets\docubuilder.ico
 UninstallDisplayIcon={app}\DocuBuilder.exe
 UninstallDisplayName={#VerName}
 CloseApplications=yes
+; Explorer am Ende benachrichtigen, damit Verknüpfungen ihr Symbol neu laden
+ChangesAssociations=yes
 #ifdef Signed
 ; Setup und Deinstallationsprogramm signieren (build_installer.bat übergibt /Sdocusign=...)
 SignTool=docusign $f
@@ -57,11 +59,16 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\dist\DocuBuilder\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+; Eigenes Symbol für die Verknüpfungen (siehe [Icons])
+Source: "..\assets\docubuilder.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-; AppUserModelID wie im Programm: angeheftetes Taskleisten-Symbol und Fenster gehören zusammen
-Name: "{autoprograms}\DocuBuilder"; Filename: "{app}\DocuBuilder.exe"; AppUserModelID: "PatrickLange.DocuBuilder"
-Name: "{autodesktop}\DocuBuilder"; Filename: "{app}\DocuBuilder.exe"; AppUserModelID: "PatrickLange.DocuBuilder"; Tasks: desktopicon
+; AppUserModelID wie im Programm: angeheftetes Taskleisten-Symbol und Fenster gehören zusammen.
+; IconFilename: Versionen bis 1.0.1.0 hatten das Python-Symbol in DocuBuilder.exe. Windows merkt
+; sich Symbole pro Pfad, deshalb zeigte die Verknüpfung nach einem Update weiter das alte Symbol.
+; Mit eigener .ico-Datei wird das richtige Symbol neu geladen (Issue #1).
+Name: "{autoprograms}\DocuBuilder"; Filename: "{app}\DocuBuilder.exe"; IconFilename: "{app}\docubuilder.ico"; AppUserModelID: "PatrickLange.DocuBuilder"
+Name: "{autodesktop}\DocuBuilder"; Filename: "{app}\DocuBuilder.exe"; IconFilename: "{app}\docubuilder.ico"; AppUserModelID: "PatrickLange.DocuBuilder"; Tasks: desktopicon
 
 [Run]
 ; Gemeinsamen Einstellungsordner (C:\ProgramData\DocuBuilder) mit den passenden Rechten anlegen

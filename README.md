@@ -5,7 +5,7 @@ Kleines Desktop-Tool für Windows und Linux: Eine Auswahl an Buttons, jeder Butt
 ## Funktionen
 - Buttons öffnen Excel-Dateien mit dem Standardprogramm (Windows: Excel, Linux: `xdg-open`)
 - Unterstützt lokale Pfade, Netzpfade (`\\Server\Freigabe\datei.xlsx`) und Web-Links
-- Einstellungen mit zwei Reitern: **Einträge** und **Allgemein** (Ansicht hell/dunkel/System, Updates)
+- Einstellungen mit zwei Reitern: **Einträge** und **Allgemein** (Ansicht hell/dunkel/System, Farbschema, Updates)
 - **Menü** oben rechts: Nach Updates suchen, Info zu DocuBuilder, Beenden
 - **Anmeldung** beim Start mit Benutzername und Passwort; das Konto **Admin** besteht immer
 - **Default-Fenster**: beim ersten Start legst du das Admin-Passwort, die Benutzer, die Anzahl der Buttons und den Ordner mit deinen Dateien fest (Excel-Dateien aus dem Ordner können direkt als Buttons übernommen werden). Danach öffnet es sich nur noch mit **ALT+F11** (alternativ **STRG+UMSCHALT+F11**)
@@ -54,6 +54,15 @@ Danach beendet sich DocuBuilder, und die Programmdatei (`DocuBuilder.exe`) kann 
 python docubuilder.py        # Windows
 python3 docubuilder.py       # Linux (benötigt python3-tk)
 ```
+## So sieht DocuBuilder aus
+
+<img width="722" height="412" alt="1-anmeldung" src="https://github.com/user-attachments/assets/18d51bb8-d720-41bf-baea-75251c00efce" />
+<img width="722" height="412" alt="2-hauptfenster-hell" src="https://github.com/user-attachments/assets/299429f0-2b18-49c2-b533-43d9e31dca3e" />
+<img width="722" height="592" alt="4-einstellungen-eintraege" src="https://github.com/user-attachments/assets/9002ae7d-c231-4277-971e-cf6a45507a0d" />
+<img width="722" height="412" alt="3-hauptfenster-dunkel" src="https://github.com/user-attachments/assets/e82467e2-6ddd-4613-9e55-b31843515cdc" />
+<img width="722" height="592" alt="5-einstellungen-allgemein-dunkel" src="https://github.com/user-attachments/assets/55f68635-c50e-4429-8900-0ca2c9511183" />
+
+
 
 ## Fertige Programme herunterladen
 Unter **Releases** liegen `DocuBuilder.exe` (Windows) und `DocuBuilder` (Linux).

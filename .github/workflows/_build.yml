@@ -22,10 +22,10 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Version setzen
@@ -40,7 +40,7 @@ jobs:
 
       - name: Unsignierte Dateien hochladen
         id: unsigned
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unsigned-windows
           path: |
@@ -51,7 +51,7 @@ jobs:
       - name: Mit SignPath signieren
         id: sign
         if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
-        uses: signpath/github-action-submit-signing-request@v1
+        uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
@@ -99,7 +99,7 @@ jobs:
       - name: Unsigniertes Setup hochladen
         id: unsigned_setup
         if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && vars.SIGNPATH_SETUP_ARTIFACT_CONFIGURATION_SLUG != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unsigned-setup
           path: setup-unsigned/DocuBuilder-Setup.exe
@@ -107,7 +107,7 @@ jobs:
       - name: Setup mit SignPath signieren
         id: sign_setup
         if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && vars.SIGNPATH_SETUP_ARTIFACT_CONFIGURATION_SLUG != '' }}
-        uses: signpath/github-action-submit-signing-request@v1
+        uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
@@ -138,7 +138,7 @@ jobs:
             "$h  $($_.Name)" | Out-File -Encoding ascii "$($_.FullName).sha256"
           }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: |
@@ -148,10 +148,10 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Version setzen
@@ -162,7 +162,7 @@ jobs:
         run: python -m PyInstaller --onefile --windowed --name DocuBuilder --add-data "assets/docubuilder.png:assets" docubuilder.py
       - name: Prüfsumme erzeugen
         run: cd dist && sha256sum DocuBuilder > DocuBuilder.sha256
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: |
