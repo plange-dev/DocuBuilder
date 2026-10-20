@@ -54,7 +54,7 @@ Danach beendet sich DocuBuilder, und die Programmdatei (`DocuBuilder.exe`) kann 
 python docubuilder.py        # Windows
 python3 docubuilder.py       # Linux (benötigt python3-tk)
 ```
-## So sieht DucoBuilder aus
+## So sieht DocuBuilder aus
 
 <img width="722" height="412" alt="1-anmeldung" src="https://github.com/user-attachments/assets/18d51bb8-d720-41bf-baea-75251c00efce" />
 <img width="722" height="412" alt="2-hauptfenster-hell" src="https://github.com/user-attachments/assets/299429f0-2b18-49c2-b533-43d9e31dca3e" />
