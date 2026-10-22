@@ -1,0 +1,43 @@
+# Netzwerk-Version: jede Änderung auf dem Branch netzwerk-version wird für Windows und Linux gebaut.
+# Kein Release (sonst würde die Update-Suche von Nightly es anbieten): Setup, portable .exe und
+# Linux-Paket liegen als Artefakte am jeweiligen Lauf unter Actions.
+# Version = Stable-Version + Anzahl der Commits seit main (wie Nightly).
+name: Netzwerk-Version
+
+on:
+  push:
+    branches: [netzwerk-version]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read   # nötig für SignPath
+
+concurrency:
+  group: netzwerk-version
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Version berechnen
+        id: v
+        run: echo "version=$(python tools/version.py nightly)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    uses: ./.github/workflows/_build.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      channel: stable
+      ref: ${{ github.sha }}
+    secrets: inherit

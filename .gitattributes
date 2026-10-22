@@ -4,3 +4,5 @@
 # Binärdateien nie umwandeln
 *.ico binary
 *.png binary
+# Shell-Skripte brauchen LF (sonst bricht bash mit $'\r' ab)
+*.sh eol=lf

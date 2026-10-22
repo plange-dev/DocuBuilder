@@ -52,7 +52,12 @@ WizardStyle=modern
 Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+; Verknüpfung auf dem Desktop aller Benutzer (Netzwerk-Version: jeder meldet sich mit eigenem Konto an)
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+
+[UninstallDelete]
+; von der Seite „Betriebsart“ angelegt (siehe [Code])
+Type: files; Name: "{app}\server.txt"
 
 [Files]
 ; Programmordner (PyInstaller --onedir): DocuBuilder.exe und _internal\
@@ -92,6 +97,168 @@ function CloseHandle(hObject: Cardinal): Integer;
 
 const
   SYNCHRONIZE = $00100000;
+  MODE_SINGLE = 0;
+  MODE_SERVER = 1;
+  MODE_CLIENT = 2;
+  SHARE_NAME = 'DocuBuilder';
+
+var
+  ModePage: TInputOptionWizardPage;
+  PathPage: TInputQueryWizardPage;
+
+{ Betriebsart (Netzwerk-Version). Still installieren:
+    /BETRIEB=einzel | server | arbeitsplatz   /ORDNER="\\Server\DocuBuilder"
+  Einzelplatz: Einstellungen in C:\ProgramData\DocuBuilder (wie bisher).
+  Server: gemeinsamer Datenordner auf diesem Rechner, wird als \\<Rechner>\DocuBuilder freigegeben.
+  Arbeitsplatz: Daten liegen im freigegebenen Ordner des Servers. }
+function SelectedMode: Integer;
+begin
+  Result := MODE_SINGLE;
+  if ModePage.Values[MODE_SERVER] then
+    Result := MODE_SERVER
+  else if ModePage.Values[MODE_CLIENT] then
+    Result := MODE_CLIENT;
+end;
+
+function IsServerMode: Boolean;
+begin
+  Result := SelectedMode = MODE_SERVER;
+end;
+
+function DefaultFolder(Mode: Integer): String;
+begin
+  if Mode = MODE_SERVER then
+    Result := ExpandConstant('{sd}\DocuBuilder-Daten')
+  else
+    Result := '\\SERVER\' + SHARE_NAME;
+end;
+
+procedure InitializeWizard;
+var
+  Mode: Integer;
+  Param, Folder: String;
+begin
+  ModePage := CreateInputOptionPage(wpSelectDir, 'Betriebsart',
+    'Wie wird DocuBuilder genutzt?',
+    'Im Netzwerk liegen Einträge, Benutzer und Rechte zentral auf dem Server. Jeder Arbeitsplatz ' +
+    'greift darauf zu; alle können gleichzeitig arbeiten.', True, False);
+  ModePage.Add('Einzelplatz – Einstellungen nur auf diesem Rechner');
+  ModePage.Add('Server – gemeinsamer Datenordner liegt auf diesem Rechner und wird freigegeben');
+  ModePage.Add('Arbeitsplatz im Netzwerk – Daten liegen auf dem Server');
+
+  PathPage := CreateInputQueryPage(ModePage.ID, 'Gemeinsamer Ordner',
+    'Wo liegen die gemeinsamen Daten?',
+    'Server: lokaler Ordner auf diesem Rechner (z. B. D:\DocuBuilder-Daten).' + #13#10 +
+    'Arbeitsplatz: freigegebener Ordner des Servers (z. B. \\SERVER\DocuBuilder).');
+  PathPage.Add('Ordner:', False);
+
+  Mode := StrToIntDef(GetPreviousData('Betriebsart', '0'), MODE_SINGLE);
+  Folder := GetPreviousData('Ordner', '');
+  Param := Lowercase(ExpandConstant('{param:BETRIEB|}'));
+  if Param = 'einzel' then Mode := MODE_SINGLE;
+  if Param = 'server' then Mode := MODE_SERVER;
+  if Param = 'arbeitsplatz' then Mode := MODE_CLIENT;
+  Param := ExpandConstant('{param:ORDNER|}');
+  if Param <> '' then Folder := Param;
+  if (Mode < MODE_SINGLE) or (Mode > MODE_CLIENT) then Mode := MODE_SINGLE;
+  ModePage.Values[Mode] := True;
+  if Folder = '' then Folder := DefaultFolder(Mode);
+  PathPage.Values[0] := Folder;
+end;
+
+procedure RegisterPreviousData(PreviousDataKey: Integer);
+begin
+  SetPreviousData(PreviousDataKey, 'Betriebsart', IntToStr(SelectedMode));
+  SetPreviousData(PreviousDataKey, 'Ordner', PathPage.Values[0]);
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := (PageID = PathPage.ID) and (SelectedMode = MODE_SINGLE);
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  Folder: String;
+begin
+  Result := True;
+  if CurPageID = ModePage.ID then
+  begin
+    { Vorschlag passend zur Betriebsart, solange noch der andere Vorschlag drinsteht }
+    if (PathPage.Values[0] = DefaultFolder(MODE_SERVER)) or (PathPage.Values[0] = DefaultFolder(MODE_CLIENT)) then
+      PathPage.Values[0] := DefaultFolder(SelectedMode);
+  end
+  else if CurPageID = PathPage.ID then
+  begin
+    Folder := Trim(PathPage.Values[0]);
+    PathPage.Values[0] := Folder;
+    if Folder = '' then
+    begin
+      MsgBox('Bitte einen Ordner angeben.', mbError, MB_OK);
+      Result := False;
+    end
+    else if IsServerMode and (Copy(Folder, 1, 2) = '\\') then
+    begin
+      MsgBox('Auf dem Server bitte einen lokalen Ordner angeben (z. B. D:\DocuBuilder-Daten). ' +
+             'Er wird anschließend als \\' + GetComputerNameString + '\' + SHARE_NAME + ' freigegeben.',
+             mbError, MB_OK);
+      Result := False;
+    end
+    else if (SelectedMode = MODE_CLIENT) and not DirExists(Folder) then
+      Result := MsgBox('Der Ordner ist von hier aus nicht erreichbar:' + #13#10 + Folder + #13#10#13#10 +
+                       'Trotzdem verwenden? (z. B. wenn der Server gerade aus ist)',
+                       mbConfirmation, MB_YESNO) = IDYES;
+  end;
+end;
+
+{ server.txt neben dem Programm: DocuBuilder liest daraus den gemeinsamen Ordner.
+  Vor dem Kopieren der Dateien schreiben, damit "--setup-machine" ([Run]) ihn schon kennt. }
+procedure WriteServerFile;
+var
+  F: String;
+begin
+  F := ExpandConstant('{app}\server.txt');
+  if SelectedMode = MODE_SINGLE then
+  begin
+    DeleteFile(F);
+    Exit;
+  end;
+  ForceDirectories(ExpandConstant('{app}'));
+  SaveStringToFile(F, '# Gemeinsamer Ordner von DocuBuilder (vom Installationsprogramm angelegt)' + #13#10 +
+                      PathPage.Values[0] + #13#10, False);
+end;
+
+{ Server: Ordner als \\<Rechner>\DocuBuilder freigeben (Ändern für angemeldete Benutzer; was
+  jeder darf, regeln die Ordnerrechte, die DocuBuilder mit --setup-machine setzt). }
+procedure CreateShare;
+var
+  ResultCode: Integer;
+begin
+  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' +
+       'if (-not (Get-SmbShare -Name ''' + SHARE_NAME + ''' -ErrorAction SilentlyContinue)) { ' +
+       '$u = ([Security.Principal.SecurityIdentifier]''S-1-5-11'').Translate([Security.Principal.NTAccount]).Value; ' +
+       '$a = ([Security.Principal.SecurityIdentifier]''S-1-5-32-544'').Translate([Security.Principal.NTAccount]).Value; ' +
+       'New-SmbShare -Name ''' + SHARE_NAME + ''' -Path ''' + PathPage.Values[0] + ''' -ChangeAccess $u -FullAccess $a | Out-Null }"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    WriteServerFile
+  else if (CurStep = ssPostInstall) and IsServerMode then
+  begin
+    ForceDirectories(PathPage.Values[0]);
+    CreateShare;
+    if not WizardSilent then
+      MsgBox('Der gemeinsame Ordner ist freigegeben als:' + #13#10#13#10 +
+             '\\' + GetComputerNameString + '\' + SHARE_NAME + #13#10#13#10 +
+             'Diesen Pfad bei der Installation auf den Arbeitsplätzen angeben. ' +
+             'Bitte DocuBuilder hier einmal starten und die Ersteinrichtung (Admin-Passwort, ' +
+             'Benutzer, Bereiche) vornehmen, bevor die Arbeitsplätze es benutzen.',
+             mbInformation, MB_OK);
+  end;
+end;
 
 { Update aus DocuBuilder: /WAITPID=<Prozess-ID> – erst weitermachen, wenn das alte DocuBuilder
   beendet ist (höchstens 60 Sekunden; danach greift CloseApplications). }

@@ -70,3 +70,5 @@ jobs:
             out/windows/DocuBuilder-Setup-*.exe.sha256
             out/linux/DocuBuilder
             out/linux/DocuBuilder.sha256
+            out/linux/DocuBuilder-Linux-*.tar.gz
+            out/linux/DocuBuilder-Linux-*.tar.gz.sha256

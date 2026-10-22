@@ -160,11 +160,23 @@ jobs:
       - run: python -m pip install pyinstaller
       - name: Bauen
         run: python -m PyInstaller --onefile --windowed --name DocuBuilder --add-data "assets/docubuilder.png:assets" docubuilder.py
-      - name: Prüfsumme erzeugen
-        run: cd dist && sha256sum DocuBuilder > DocuBuilder.sha256
+      # Installationspaket: Programm + install.sh (Einzelplatz, Server oder Arbeitsplatz)
+      - name: Installationspaket packen
+        run: |
+          mkdir -p pkg/DocuBuilder
+          cp dist/DocuBuilder installer/linux/install.sh assets/docubuilder.png README.md LICENSE pkg/DocuBuilder/
+          chmod 755 pkg/DocuBuilder/DocuBuilder pkg/DocuBuilder/install.sh
+          tar -czf "dist/DocuBuilder-Linux-${{ inputs.version }}.tar.gz" -C pkg DocuBuilder
+      - name: Prüfsummen erzeugen
+        run: |
+          cd dist
+          sha256sum DocuBuilder > DocuBuilder.sha256
+          for f in DocuBuilder-Linux-*.tar.gz; do sha256sum "$f" > "$f.sha256"; done
       - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: |
             dist/DocuBuilder
             dist/DocuBuilder.sha256
+            dist/DocuBuilder-Linux-*.tar.gz
+            dist/DocuBuilder-Linux-*.tar.gz.sha256

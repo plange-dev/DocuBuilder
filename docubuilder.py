@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 import webbrowser
 import tkinter as tk
@@ -35,7 +36,7 @@ MIN_PW_LEN = 4
 # Tastenkombinationen, die das Default-Fenster nach der ersten Einrichtung öffnen.
 # Die zweite gilt als Ersatz, falls das System ALT+F11 selbst belegt.
 DEFAULT_SHORTCUTS = ("<Alt-F11>", "<Control-Shift-F11>")
-EXCEL_EXT = (".xlsx", ".xlsm", ".xls", ".xlsb", ".csv", ".ods")
+EXCEL_EXT = (".xlsx", ".xlsm", ".xls", ".xlsb", ".xltx", ".xltm", ".csv", ".ods")
 MAX_ITEMS_LIMIT = 200
 
 # Farbschemata nach den Farben des Icons (Blau #3654E8, Dunkelblau #1F2A44, Orange #FFB020).
@@ -74,7 +75,11 @@ COLOR_SCHEMES = {
 DEFAULT_SCHEME = "blau_orange"
 
 DEFAULT_SETTINGS = {"theme": "system", "scheme": DEFAULT_SCHEME, "max_items": 20, "files_dir": "",
-                    "setup_done": False, "users": [], "update_check": False}
+                    "setup_done": False, "users": [], "update_check": False, "categories": []}
+# Bereiche: Einträge gehören zu einem Bereich (oder zu keinem = für alle sichtbar), Benutzer sehen
+# nur die Bereiche, die der Admin ihnen freigibt. Vorschlag bei der Ersteinrichtung:
+DEFAULT_CATEGORIES = ["Arbeitsvorbereitung", "Angebote", "Abrechnung"]
+ALL_LABEL = "(alle)"
 
 
 # ---------------------------------------------------------------- Konfiguration
@@ -100,12 +105,17 @@ MAGIC = b"DBC1"
 # gegen Entschlossene, die den Quelltext kennen (siehe README).
 _SEED = b"DocuBuilder/settings/v1/7c2e9b41"
 PORTABLE_FLAG = "portable.txt"
+# Netzwerk-Version: server.txt neben dem Programm (oder unter Linux in /etc/docubuilder) nennt den
+# gemeinsamen Ordner auf dem Server. Erste Zeile: Ordner, z. B. \\Server\DocuBuilder.
+# Weitere Zeilen "Windows-Pfad = Linux-Pfad" übersetzen Pfade für Linux-Arbeitsplätze.
+SERVER_FILE = "server.txt"
 LINUX_SHARED = "/etc/docubuilder"
+OFFLINE_TEXT = ("Der Server ist nicht erreichbar. Bitte Netzwerk prüfen und erneut anmelden.")
 NO_RIGHTS = ("Nur der Admin oder Benutzer mit dem Recht „Darf ändern“ dürfen Einträge und "
              "Default-Einstellungen ändern.")
 # Gemeinsame Einstellungen für alle Benutzer; die Ansicht ("theme") speichert jeder Benutzer selbst.
-MACHINE_KEYS = ("max_items", "files_dir", "setup_done", "users")
-STATE = {"legacy": None, "error": False}
+MACHINE_KEYS = ("max_items", "files_dir", "setup_done", "users", "categories")
+STATE = {"legacy": None, "error": False, "stamp": None, "conflict": False, "offline": False}
 
 
 def _set_win_attr(path, attr):
@@ -165,7 +175,13 @@ def prepare_machine_dir(d):
     Einstellungsdatei lesen und überschreiben (wer was ändern darf, prüft die Anmeldung im
     Programm), aber nicht löschen oder ersetzen. Sonst ließe sich durch Löschen eine neue
     Ersteinrichtung mit eigenem Admin erzwingen."""
-    if is_portable() or (not WIN and d != LINUX_SHARED):
+    if is_portable() or (not WIN and d not in (LINUX_SHARED, NETWORK["dir"])):
+        return
+    if is_unc(d):                            # Freigabe: die Rechte setzt der Server
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            pass
         return
     created = not os.path.isdir(d)
     try:
@@ -208,8 +224,56 @@ def user_dir():
         return app_dir()
 
 
+def is_unc(path):
+    return path.startswith(("\\\\", "//"))
+
+
+def read_server_file():
+    """Netzwerk-Version: {"dir": gemeinsamer Ordner, "map": [(von, nach), ...]} aus server.txt.
+    dir ist leer, wenn es keine server.txt gibt (Einzelplatz)."""
+    net = {"dir": "", "map": [], "file": ""}
+    for d in (app_dir(), LINUX_SHARED) if not WIN else (app_dir(),):
+        path = os.path.join(d, SERVER_FILE)
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                lines = [ln.strip() for ln in f if ln.strip() and not ln.lstrip().startswith("#")]
+        except OSError:
+            continue
+        net["file"] = path
+        for ln in lines:
+            if "=" in ln:
+                src, dst = (s.strip() for s in ln.split("=", 1))
+                if src and dst:
+                    net["map"].append((src, dst))
+            elif not net["dir"]:
+                net["dir"] = os.path.expandvars(os.path.expanduser(ln))
+        break
+    if net["dir"]:
+        net["dir"] = map_path(net["dir"], net["map"])
+    return net
+
+
+def map_path(path, mapping):
+    """Pfad nach den Zeilen "von = nach" aus server.txt übersetzen (z. B. \\\\Server\\Vorlagen →
+    /mnt/vorlagen auf Linux-Arbeitsplätzen). Ohne passende Zeile bleibt der Pfad unverändert."""
+    norm = path.replace("\\", "/")
+    for src, dst in mapping:
+        s = src.replace("\\", "/").rstrip("/")
+        if norm.lower() == s.lower() or norm.lower().startswith(s.lower() + "/"):
+            rest = norm[len(s):].lstrip("/")
+            joined = dst.rstrip("/\\") + ("/" + rest if rest else "")
+            return os.path.normpath(joined)
+    return path
+
+
+NETWORK = read_server_file()
+
+
 def machine_dir():
-    """Gemeinsamer Ordner für alle Benutzer. Mit portable.txt neben dem Programm: Programmordner."""
+    """Gemeinsamer Ordner für alle Benutzer. Netzwerk-Version: Ordner aus server.txt.
+    Mit portable.txt neben dem Programm: Programmordner."""
+    if NETWORK["dir"]:
+        return NETWORK["dir"]
     if is_portable():
         return app_dir()
     if WIN:
@@ -287,19 +351,32 @@ def clean_settings(raw):
             pass
         s["files_dir"] = str(raw.get("files_dir") or "")
         s["setup_done"] = bool(raw.get("setup_done", False))
-        s["users"] = clean_users(raw.get("users"))
+        s["categories"] = clean_categories(raw.get("categories"))
+        s["users"] = clean_users(raw.get("users"), s["categories"])
         h = raw.get("admin_hash")              # bis 1.3: Passwort des Default-Fensters
         if not s["users"] and isinstance(h, str) and h.startswith("pbkdf2$"):
             s["users"] = [new_user(ADMIN_NAME, h, admin=True)]
     return s
 
 
-def new_user(name, pw_hash, admin=False, can_edit=False):
-    return {"name": name, "hash": pw_hash, "admin": admin, "can_edit": admin or can_edit}
+def clean_categories(raw):
+    cats, seen = [], set()
+    for c in raw if isinstance(raw, list) else []:
+        c = str(c).strip()
+        if c and c.lower() not in seen and c != ALL_LABEL:
+            seen.add(c.lower())
+            cats.append(c)
+    return cats
 
 
-def clean_users(raw):
-    """Gültige Konten; nur das Konto ADMIN_NAME ist Admin, Namen sind eindeutig."""
+def new_user(name, pw_hash, admin=False, can_edit=False, cats=()):
+    return {"name": name, "hash": pw_hash, "admin": admin, "can_edit": admin or can_edit,
+            "cats": list(cats)}
+
+
+def clean_users(raw, categories=()):
+    """Gültige Konten; nur das Konto ADMIN_NAME ist Admin, Namen sind eindeutig.
+    Konten aus Versionen ohne Bereiche sehen weiterhin alle Bereiche."""
     users, seen = [], set()
     for u in raw if isinstance(raw, list) else []:
         if not isinstance(u, dict):
@@ -309,9 +386,21 @@ def clean_users(raw):
             continue
         seen.add(name.lower())
         is_adm = name.lower() == ADMIN_NAME.lower()
-        users.append(new_user(ADMIN_NAME if is_adm else name, h, is_adm, bool(u.get("can_edit"))))
+        cats = u.get("cats") if isinstance(u.get("cats"), list) else categories
+        cats = [c for c in categories if c in cats]
+        users.append(new_user(ADMIN_NAME if is_adm else name, h, is_adm, bool(u.get("can_edit")),
+                              cats))
     users.sort(key=lambda u: not u["admin"])  # Admin immer zuerst
     return users
+
+
+def sees_all(user):
+    """Admin und Benutzer mit „Darf ändern“ sehen alle Bereiche (sie pflegen die Einträge)."""
+    return bool(user and (user["admin"] or user["can_edit"]))
+
+
+def visible(item, user):
+    return sees_all(user) or not item.get("cat") or item["cat"] in user["cats"]
 
 
 def find_user(users, name):
@@ -325,9 +414,13 @@ def has_admin(settings):
 def parse_config(data):
     raw_items = data if isinstance(data, list) else data.get("items", []) if isinstance(data, dict) else []
     raw_settings = data.get("settings") if isinstance(data, dict) else None
-    items = [{"name": str(x.get("name", "")), "path": str(x.get("path", ""))}
+    items = [{"name": str(x.get("name", "")), "path": str(x.get("path", "")),
+              "cat": str(x.get("cat") or "")}
              for x in raw_items if isinstance(x, dict)]
     settings = clean_settings(raw_settings)
+    for it in items:                           # Bereich gelöscht: Eintrag gilt wieder für alle
+        if it["cat"] not in settings["categories"]:
+            it["cat"] = ""
     if not (isinstance(raw_settings, dict) and "setup_done" in raw_settings):
         settings["setup_done"] = bool(items)   # ältere Dateien: Einrichtung gilt als erledigt
     return settings, items
@@ -341,19 +434,76 @@ def read_store(path, allow_plain=False):
     return json.loads(decrypt_blob(raw).decode("utf-8"))
 
 
-def write_store(path, obj, shared=False):
+class ConfigChanged(Exception):
+    """Die gemeinsame Konfiguration wurde seit dem Einlesen an einem anderen Platz geändert."""
+
+
+def file_stamp(raw):
+    """Kennung eines Dateistands ("" = keine Datei)."""
+    return hashlib.sha256(raw).hexdigest() if raw else ""
+
+
+# Gesperrt wird ein Byte weit hinter dem Dateiende: Unter Windows sind Sperren verbindlich, eine
+# Sperre am Dateianfang würde sonst alle Lesenden blockieren. So schließen sich nur Speichernde aus.
+LOCK_OFFSET = 0x7FFFFFF0
+
+
+def _lock(f, tries=50):
+    for _ in range(tries):
+        try:
+            if WIN:
+                import msvcrt
+                f.seek(LOCK_OFFSET)
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB, 1, LOCK_OFFSET)
+            return True
+        except OSError:
+            time.sleep(0.1)
+    return False
+
+
+def _unlock(f):
+    try:
+        if WIN:
+            import msvcrt
+            f.seek(LOCK_OFFSET)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.lockf(f, fcntl.LOCK_UN, 1, LOCK_OFFSET)
+    except OSError:
+        pass
+
+
+def write_store(path, obj, shared=False, expect=None):
+    """Speichert verschlüsselt. shared: gemeinsame Datei; mit expect (Kennung beim Einlesen)
+    wird ConfigChanged ausgelöst, wenn inzwischen jemand anderes gespeichert hat.
+    Liefert die Kennung des neuen Stands."""
     data = encrypt_blob(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
     if shared:
         # Gemeinsame Datei direkt überschreiben: Benutzer dürfen sie ändern, aber nicht
         # löschen oder ersetzen (siehe prepare_machine_dir).
         unprotect_file(path)
         try:
-            with open(path, "r+b" if os.path.exists(path) else "xb") as f:
-                f.write(data)
-                f.truncate()
+            with open(path, "r+b" if os.path.exists(path) else "x+b") as f:
+                if not _lock(f):
+                    raise OSError("Die Einstellungen werden gerade an einem anderen Platz "
+                                  "gespeichert. Bitte gleich noch einmal versuchen.")
+                try:
+                    f.seek(0)
+                    if expect is not None and file_stamp(f.read()) != expect:
+                        raise ConfigChanged()
+                    f.seek(0)
+                    f.write(data)
+                    f.truncate()
+                    f.flush()
+                finally:
+                    _unlock(f)
         finally:
             protect_file(path, shared)
-        return
+        return file_stamp(data)
     tmp = path + ".tmp"
     with open(tmp, "wb") as f:
         f.write(data)
@@ -362,16 +512,39 @@ def write_store(path, obj, shared=False):
         os.replace(tmp, path)
     finally:
         protect_file(path, shared)
+    return file_stamp(data)
+
+
+def server_offline():
+    """Netzwerk-Version: gemeinsamer Ordner nicht erreichbar (Server aus, kein Netz, keine Rechte)."""
+    return bool(NETWORK["dir"]) and not os.path.isdir(MACHINE_DIR)
+
+
+def read_config_raw():
+    with open(CONFIG, "rb") as f:
+        return f.read()
 
 
 def load_config():
     """Liest die gemeinsame Konfiguration. Ältere Dateien (1.3, config.json) werden übernommen."""
+    STATE.update(error=False, conflict=False, offline=server_offline())
+    if STATE["offline"]:
+        return clean_settings(None), []
     if os.path.exists(CONFIG):
-        try:
-            return parse_config(read_store(CONFIG))
-        except (OSError, ValueError):
-            STATE["error"] = True
-            return clean_settings(None), []
+        # Mehrere Versuche: im Netzwerk kann gerade ein anderer Platz die Datei schreiben.
+        for _ in range(5):
+            try:
+                raw = read_config_raw()
+                data = json.loads(decrypt_blob(raw).decode("utf-8"))
+                STATE["stamp"] = file_stamp(raw)
+                return parse_config(data)
+            except (OSError, ValueError):
+                time.sleep(0.2)
+        STATE["error"] = True
+        return clean_settings(None), []
+    STATE["stamp"] = ""
+    if NETWORK["dir"]:                         # ältere Einzelplatz-Dateien nicht ins Netz übernehmen
+        return clean_settings(None), []
     for path in LEGACY_FILES:
         if os.path.isfile(path):
             try:
@@ -399,14 +572,26 @@ def load_prefs(settings):
 
 def save_config(settings, items):
     try:
-        write_store(CONFIG, {"settings": {k: settings[k] for k in MACHINE_KEYS}, "items": items},
-                    shared=True)
+        STATE["stamp"] = write_store(
+            CONFIG, {"settings": {k: settings[k] for k in MACHINE_KEYS}, "items": items},
+            shared=True, expect=STATE["stamp"])
         return True
+    except ConfigChanged:
+        STATE["conflict"] = True
+        messagebox.showwarning(APP_NAME, "Die Einstellungen wurden inzwischen an einem anderen "
+                                         "Platz geändert. Deine Änderung wurde nicht gespeichert.\n\n"
+                                         "DocuBuilder lädt jetzt den aktuellen Stand. Bitte die "
+                                         "Änderung danach noch einmal vornehmen.")
     except PermissionError:
-        messagebox.showerror(APP_NAME, "Windows erlaubt das Speichern nicht:\n" + CONFIG +
-                             "\n\nBitte DocuBuilder einmal als Administrator starten "
-                             "(Rechtsklick → Als Administrator ausführen), damit die Rechte "
-                             "gesetzt werden.")
+        if NETWORK["dir"]:
+            messagebox.showerror(APP_NAME, "Keine Schreibrechte für die gemeinsame Konfiguration:\n"
+                                 + CONFIG + "\n\nBitte die Rechte der Freigabe auf dem Server "
+                                 "prüfen (siehe README, Netzwerk-Version).")
+        else:
+            messagebox.showerror(APP_NAME, "Windows erlaubt das Speichern nicht:\n" + CONFIG +
+                                 "\n\nBitte DocuBuilder einmal als Administrator starten "
+                                 "(Rechtsklick → Als Administrator ausführen), damit die Rechte "
+                                 "gesetzt werden.")
     except OSError as e:
         messagebox.showerror(APP_NAME, f"Einstellungen konnten nicht gespeichert werden:\n{e}")
     return False
@@ -467,9 +652,13 @@ def remove_all_data():
     user = os.path.dirname(PREFS)
     for p in [user] if _own_dir(user) else [PREFS, PREFS + ".tmp"] + LEGACY_FILES:
         _remove(p)
-    target = MACHINE_DIR if _own_dir(MACHINE_DIR) else CONFIG
+    # Netzwerk-Version: nur die Konfigurationsdatei, nie den Ordner auf dem Server
+    target = MACHINE_DIR if _own_dir(MACHINE_DIR) and not NETWORK["dir"] else CONFIG
     if _remove(target):
         return None
+    if NETWORK["dir"]:
+        return ("Die gemeinsame Konfiguration auf dem Server konnte nicht gelöscht werden. Bitte "
+                f"auf dem Server löschen lassen:\n{target}")
     if WIN:
         if os.path.isdir(target):
             cmd = f'/c attrib -R -H "{target}\\*" & rmdir /s /q "{target}"'
@@ -657,9 +846,10 @@ def open_target(path, base=""):
     if re.match(r"^https?://", path, re.I):
         webbrowser.open(path)
         return
-    full = os.path.expandvars(os.path.expanduser(path))
-    if base and not os.path.isabs(full):
-        full = os.path.join(base, full)   # relative Pfade ab dem Dateiordner (Default)
+    full = map_path(os.path.expandvars(os.path.expanduser(path)), NETWORK["map"])
+    if base and not (os.path.isabs(full) or is_unc(full)):
+        # relative Pfade ab dem Dateiordner (Default)
+        full = os.path.join(map_path(base, NETWORK["map"]), full)
     if not os.path.exists(full):
         messagebox.showerror(APP_NAME, f"Datei nicht gefunden:\n{full}")
         return
@@ -694,7 +884,7 @@ def fill_from_folder(items, folder, n):
         key = os.path.normcase(os.path.normpath(path))
         if key in existing:
             continue
-        entry = {"name": os.path.splitext(os.path.basename(path))[0], "path": path}
+        entry = {"name": os.path.splitext(os.path.basename(path))[0], "path": path, "cat": ""}
         slot = next((i for i, it in enumerate(items) if not it["path"]), None)
         if slot is not None:
             items[slot] = entry
@@ -784,6 +974,13 @@ def setup_style(root, p):
     s.map("TEntry", **field_map)
     s.configure("TSpinbox", background=p["btn"], arrowcolor=p["fg"], **field)
     s.map("TSpinbox", background=[("active", p["btn_hover"])], arrowcolor=dis, **field_map)
+    s.configure("TCombobox", background=p["btn"], arrowcolor=p["fg"], **field)
+    s.map("TCombobox", background=[("active", p["btn_hover"])], arrowcolor=dis,
+          **dict(field_map, fieldbackground=[("disabled", p["bg"]), ("readonly", p["panel"])]))
+    root.option_add("*TCombobox*Listbox.background", p["panel"])
+    root.option_add("*TCombobox*Listbox.foreground", p["fg"])
+    root.option_add("*TCombobox*Listbox.selectBackground", p["accent"])
+    root.option_add("*TCombobox*Listbox.selectForeground", p["accent_fg"])
     for kind in ("TRadiobutton", "TCheckbutton"):
         s.configure(kind, background=p["bg"], foreground=p["fg"], indicatorbackground=p["panel"],
                     indicatorforeground=p["accent_fg"], upperbordercolor=p["line"],
@@ -848,12 +1045,14 @@ class Settings(tk.Toplevel):
         f = self.tab_items
         f.columnconfigure(0, weight=1)
         f.rowconfigure(0, weight=1)
-        self.tree = ttk.Treeview(f, columns=("name", "path"), show="headings",
+        self.tree = ttk.Treeview(f, columns=("name", "cat", "path"), show="headings",
                                  selectmode="browse", height=8)
         self.tree.heading("name", text="Name")
+        self.tree.heading("cat", text="Bereich")
         self.tree.heading("path", text="Pfad / Link")
-        self.tree.column("name", width=170)
-        self.tree.column("path", width=360)
+        self.tree.column("name", width=160)
+        self.tree.column("cat", width=130)
+        self.tree.column("path", width=280)
         self.tree.grid(row=0, column=0, sticky="nsew")
         sb = ttk.Scrollbar(f, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -884,8 +1083,13 @@ class Settings(tk.Toplevel):
         edit[-1].grid(row=1, column=1, sticky="ew", pady=3)
         edit.append(ttk.Button(form, text="Durchsuchen …", command=self.browse))
         edit[-1].grid(row=1, column=2, padx=(6, 0))
+        ttk.Label(form, text="Bereich:").grid(row=2, column=0, sticky="w", pady=3)
+        self.cat_var = tk.StringVar(value=ALL_LABEL)
+        edit.append(ttk.Combobox(form, textvariable=self.cat_var, state="readonly", width=28,
+                                 values=[ALL_LABEL] + self.app.settings["categories"]))
+        edit[-1].grid(row=2, column=1, sticky="w", pady=3)
         btns = ttk.Frame(form)
-        btns.grid(row=2, column=0, columnspan=3, sticky="e", pady=(8, 0))
+        btns.grid(row=3, column=0, columnspan=3, sticky="e", pady=(8, 0))
         edit.append(ttk.Button(btns, text="Neuer Eintrag", command=self.new))
         edit[-1].pack(side="left", padx=4)
         edit.append(ttk.Button(btns, text="Speichern", style="Accent.TButton",
@@ -903,8 +1107,10 @@ class Settings(tk.Toplevel):
         items = self.app.items
         self.tree.delete(*self.tree.get_children())
         for i, it in enumerate(items):
-            self.tree.insert("", "end", iid=str(i), values=(it["name"], it["path"]))
-        if select is not None and 0 <= select < len(items):
+            if visible(it, self.app.user):           # fremde Bereiche auch hier nicht zeigen
+                self.tree.insert("", "end", iid=str(i),
+                                 values=(it["name"], it["cat"] or ALL_LABEL, it["path"]))
+        if select is not None and self.tree.exists(str(select)):
             self.tree.selection_set(str(select))
             self.tree.see(str(select))
         self.counter.configure(text=f"{len(items)} von {self.app.settings['max_items']}")
@@ -918,17 +1124,19 @@ class Settings(tk.Toplevel):
         if i is not None:
             self.name_var.set(self.app.items[i]["name"])
             self.path_var.set(self.app.items[i]["path"])
+            self.cat_var.set(self.app.items[i]["cat"] or ALL_LABEL)
 
     def new(self):
         self.tree.selection_remove(self.tree.selection())
         self.name_var.set("")
         self.path_var.set("")
+        self.cat_var.set(ALL_LABEL)
 
     def browse(self):
         p = filedialog.askopenfilename(
             parent=self, title="Excel-Datei wählen",
             initialdir=self.app.settings["files_dir"] or None,
-            filetypes=[("Excel-Dateien", "*.xlsx *.xlsm *.xls *.xlsb *.csv *.ods"),
+            filetypes=[("Excel-Dateien", "*.xlsx *.xlsm *.xls *.xlsb *.xltx *.xltm *.csv *.ods"),
                        ("Alle Dateien", "*.*")])
         if p:
             self.path_var.set(os.path.normpath(p))
@@ -938,6 +1146,7 @@ class Settings(tk.Toplevel):
     def save_entry(self):
         items = self.app.items
         name, path = self.name_var.get().strip(), self.path_var.get().strip()
+        cat = self.cat_var.get() if self.cat_var.get() in self.app.settings["categories"] else ""
         if not name or not path:
             messagebox.showinfo(APP_NAME, "Bitte Name und Pfad eintragen.", parent=self)
             return
@@ -948,10 +1157,10 @@ class Settings(tk.Toplevel):
                     APP_NAME, "Die maximale Anzahl an Einträgen ist erreicht.\n"
                               "Sie ist in den Default-Einstellungen festgelegt.", parent=self)
                 return
-            items.append({"name": name, "path": path})
+            items.append({"name": name, "path": path, "cat": cat})
             i = len(items) - 1
         else:
-            items[i] = {"name": name, "path": path}
+            items[i] = {"name": name, "path": path, "cat": cat}
         self.commit(i)
 
     def delete(self):
@@ -1019,10 +1228,14 @@ class Settings(tk.Toplevel):
         if self.app.user["admin"]:
             box = ttk.LabelFrame(f, text="Daten entfernen (nur Admin)", padding=10)
             box.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+            text = ("Löscht alle Einträge, Benutzer und Passwörter auf dem Server – für alle "
+                    "Arbeitsplätze – sowie deine Ansicht. Danach wird DocuBuilder beendet."
+                    if NETWORK["dir"] else
+                    "Löscht alle Einträge, Benutzer und Passwörter dieses Rechners sowie "
+                    "deine Ansicht. Danach wird DocuBuilder beendet und kann gelöscht "
+                    "werden. Windows fragt nach Administratorrechten.")
             ttk.Label(box, style="Mute.TLabel", wraplength=560, justify="left",
-                      text="Löscht alle Einträge, Benutzer und Passwörter dieses Rechners sowie "
-                           "deine Ansicht. Danach wird DocuBuilder beendet und kann gelöscht "
-                           "werden. Windows fragt nach Administratorrechten.").pack(anchor="w")
+                      text=text).pack(anchor="w")
             ttk.Button(box, text="DocuBuilder-Daten entfernen …",
                        command=self.remove_data).pack(anchor="w", pady=(8, 0))
 
@@ -1097,10 +1310,12 @@ class InfoDialog(tk.Toplevel):
         user = app.user
         rows = (("Version", APP_VERSION + (" (Nightly)" if APP_CHANNEL == "nightly" else "")),
                 ("Lizenz", "MIT"),
+                ("Betrieb", f"Netzwerk (Server: {MACHINE_DIR})" if NETWORK["dir"] else "Einzelplatz"),
                 ("Konfiguration", CONFIG),
                 ("Angemeldet als", user["name"] + (
                     " (Admin)" if user["admin"] else
                     " (darf ändern)" if app.can_edit else " (nur ansehen)")),
+                ("Bereiche", "alle" if sees_all(user) else ", ".join(user["cats"]) or "keine"),
                 ("System", platform.platform()),
                 ("Python", platform.python_version()))
         for i, (k, v) in enumerate(rows, start=2):
@@ -1122,12 +1337,154 @@ def check_password(p1, p2):
     return None
 
 
+def category_checks(parent, cats, chosen):
+    """Häkchen je Bereich; liefert eine Funktion, die die gewählten Bereiche zurückgibt."""
+    vars_ = []
+    if not cats:
+        ttk.Label(parent, style="Mute.TLabel", text="Es sind noch keine Bereiche angelegt.").pack(
+            anchor="w")
+    for c in cats:
+        v = tk.BooleanVar(value=c in chosen)
+        ttk.Checkbutton(parent, text=c, variable=v).pack(anchor="w", pady=1)
+        vars_.append((c, v))
+    return lambda: [c for c, v in vars_ if v.get()]
+
+
+class AccessDialog(tk.Toplevel):
+    """Sichtbare Bereiche eines Benutzers festlegen."""
+
+    def __init__(self, parent, app, user, cats):
+        super().__init__(parent)
+        self.result = None
+        self.title("Bereiche")
+        self.configure(bg=app.pal["bg"])
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        set_dark_titlebar(self, app.is_dark)
+        f = ttk.Frame(self, padding=18)
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, wraplength=320, justify="left",
+                  text=f"Welche Bereiche sieht „{user['name']}“?").pack(anchor="w", pady=(0, 8))
+        self.get = category_checks(f, cats, user["cats"])
+        ttk.Label(f, style="Mute.TLabel", wraplength=320, justify="left",
+                  text="Einträge ohne Bereich sieht jeder. Mit „Darf ändern“ sieht ein Benutzer "
+                       "ohnehin alle Bereiche.").pack(anchor="w", pady=(10, 0))
+        row = ttk.Frame(f)
+        row.pack(anchor="e", pady=(12, 0))
+        ttk.Button(row, text="Abbrechen", command=self.destroy).pack(side="left", padx=6)
+        ttk.Button(row, text="OK", style="Accent.TButton", command=self.ok).pack(side="left")
+        self.bind("<Escape>", lambda ev: self.destroy())
+
+    def ok(self):
+        self.result = self.get()
+        self.destroy()
+
+
+class CategoryDialog(tk.Toplevel):
+    """Bereiche anlegen, umbenennen, löschen. Ergebnis: [(Name, Name beim Öffnen oder None)]."""
+
+    def __init__(self, parent, app, cats):
+        super().__init__(parent)
+        self.result = None
+        self.rows = [(c, c) for c in cats]
+        self.title("Bereiche verwalten")
+        self.configure(bg=app.pal["bg"])
+        self.geometry("460x380")
+        self.transient(parent)
+        self.grab_set()
+        set_dark_titlebar(self, app.is_dark)
+        f = ttk.Frame(self, padding=14)
+        f.pack(fill="both", expand=True)
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(1, weight=1)
+        ttk.Label(f, style="Mute.TLabel", wraplength=420, justify="left",
+                  text="Bereiche fassen Einträge zusammen, z. B. Arbeitsvorbereitung, Angebote, "
+                       "Abrechnung. Pro Benutzer legst du fest, welche Bereiche er sieht.").grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        self.tree = ttk.Treeview(f, columns=("name",), show="headings", selectmode="browse")
+        self.tree.heading("name", text="Bereich")
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        side = ttk.Frame(f)
+        side.grid(row=1, column=1, sticky="n", padx=(10, 0))
+        for text, cmd in (("Hinzufügen …", self.add), ("Umbenennen …", self.rename),
+                          ("Nach oben", lambda: self.move(-1)), ("Nach unten", lambda: self.move(1)),
+                          ("Löschen", self.delete)):
+            ttk.Button(side, text=text, command=cmd, width=14).pack(pady=2)
+        row = ttk.Frame(f)
+        row.grid(row=2, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ttk.Button(row, text="Abbrechen", command=self.destroy).pack(side="left", padx=6)
+        ttk.Button(row, text="OK", style="Accent.TButton", command=self.ok).pack(side="left")
+        self.bind("<Escape>", lambda ev: self.destroy())
+        self.refresh()
+
+    def refresh(self, select=None):
+        self.tree.delete(*self.tree.get_children())
+        for i, (name, _) in enumerate(self.rows):
+            self.tree.insert("", "end", iid=str(i), values=(name,))
+        if select is not None and 0 <= select < len(self.rows):
+            self.tree.selection_set(str(select))
+
+    def selected(self):
+        sel = self.tree.selection()
+        return int(sel[0]) if sel else None
+
+    def ask_name(self, title, initial=""):
+        name = simpledialog.askstring(title, "Name des Bereichs:", initialvalue=initial, parent=self)
+        name = (name or "").strip()
+        if not name:
+            return None
+        if name == ALL_LABEL or len(name) > 40:
+            messagebox.showinfo(APP_NAME, "Bitte einen anderen Namen (max. 40 Zeichen) wählen.",
+                                parent=self)
+            return None
+        if any(n.lower() == name.lower() and n != initial for n, _ in self.rows):
+            messagebox.showinfo(APP_NAME, "Diesen Bereich gibt es schon.", parent=self)
+            return None
+        return name
+
+    def add(self):
+        name = self.ask_name("Bereich hinzufügen")
+        if name:
+            self.rows.append((name, None))
+            self.refresh(len(self.rows) - 1)
+
+    def rename(self):
+        i = self.selected()
+        if i is None:
+            return
+        name = self.ask_name("Bereich umbenennen", self.rows[i][0])
+        if name:
+            self.rows[i] = (name, self.rows[i][1])
+            self.refresh(i)
+
+    def move(self, d):
+        i = self.selected()
+        if i is None or not 0 <= i + d < len(self.rows):
+            return
+        self.rows[i], self.rows[i + d] = self.rows[i + d], self.rows[i]
+        self.refresh(i + d)
+
+    def delete(self):
+        i = self.selected()
+        if i is not None and messagebox.askyesno(
+                APP_NAME, f"Bereich „{self.rows[i][0]}“ löschen?\n\nSeine Einträge sind danach für "
+                          "alle sichtbar.", parent=self):
+            del self.rows[i]
+            self.refresh()
+
+    def ok(self):
+        self.result = self.rows
+        self.destroy()
+
+
 class UserDialog(tk.Toplevel):
     """Benutzer anlegen (user=None) oder Passwort eines Benutzers neu setzen."""
 
-    def __init__(self, parent, app, taken, user=None):
+    def __init__(self, parent, app, taken, user=None, cats=()):
         super().__init__(parent)
         self.result, self.taken, self.user = None, taken, user
+        self.get_cats = lambda: []
         self.title("Passwort setzen" if user else "Benutzer anlegen")
         self.configure(bg=app.pal["bg"])
         self.resizable(False, False)
@@ -1158,10 +1515,13 @@ class UserDialog(tk.Toplevel):
             ttk.Checkbutton(f, text="Darf ändern (Einträge und Default-Fenster)",
                             variable=self.edit_var).grid(row=3, column=0, columnspan=2,
                                                          sticky="w", pady=(6, 0))
+            box = ttk.LabelFrame(f, text="Sichtbare Bereiche", padding=8)
+            box.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+            self.get_cats = category_checks(box, cats, ())
         self.msg = ttk.Label(f, wraplength=320, justify="left")
-        self.msg.grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.msg.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
         row = ttk.Frame(f)
-        row.grid(row=5, column=0, columnspan=2, sticky="e", pady=(10, 0))
+        row.grid(row=6, column=0, columnspan=2, sticky="e", pady=(10, 0))
         ttk.Button(row, text="Abbrechen", command=self.destroy).pack(side="left", padx=6)
         ttk.Button(row, text="OK", style="Accent.TButton", command=self.ok).pack(side="left")
         self.bind("<Return>", lambda ev: self.ok())
@@ -1178,7 +1538,8 @@ class UserDialog(tk.Toplevel):
         if err:
             return self.msg.configure(text=err)
         self.result = new_user(name, hash_password(self.pw1.get()),
-                               can_edit=self.user["can_edit"] if self.user else self.edit_var.get())
+                               can_edit=self.user["can_edit"] if self.user else self.edit_var.get(),
+                               cats=self.user["cats"] if self.user else self.get_cats())
         self.destroy()
 
 
@@ -1191,8 +1552,8 @@ class DefaultDialog(tk.Toplevel):
         self.first_run = first_run
         self.manage_users = first_run or app.user["admin"]
         self.title("Default – Erste Einrichtung" if first_run else "Default")
-        self.geometry("680x760" if self.manage_users else "640x480")
-        self.minsize(580, 640 if self.manage_users else 420)
+        self.geometry("720x820" if self.manage_users else "640x480")
+        self.minsize(600, 700 if self.manage_users else 420)
         self.configure(bg=app.pal["bg"])
         self.transient(app)
         self.grab_set()
@@ -1229,7 +1590,9 @@ class DefaultDialog(tk.Toplevel):
         self.pw1, self.pw2 = tk.StringVar(), tk.StringVar()
         admin = next((u for u in app.settings["users"] if u["admin"]), None)
         self.admin_hash = admin["hash"] if admin else ""
-        self.users = [dict(u) for u in app.settings["users"] if not u["admin"]]
+        self.users = [dict(u, cats=list(u["cats"])) for u in app.settings["users"] if not u["admin"]]
+        self.cats = list(app.settings["categories"] or (DEFAULT_CATEGORIES if first_run else []))
+        self.cat_origin = {c: c for c in app.settings["categories"]}   # aktueller → alter Name
         if self.manage_users:
             self.build_users(f)
         else:
@@ -1269,30 +1632,68 @@ class DefaultDialog(tk.Toplevel):
         ttk.Entry(box, textvariable=self.pw2, show="•").grid(row=2, column=1, columnspan=2,
                                                              sticky="ew", pady=3, padx=(8, 0))
 
-        self.utree = ttk.Treeview(box, columns=("name", "edit"), show="headings",
+        self.utree = ttk.Treeview(box, columns=("name", "edit", "cats"), show="headings",
                                   selectmode="browse", height=5)
         self.utree.heading("name", text="Benutzer")
         self.utree.heading("edit", text="Darf ändern")
-        self.utree.column("name", width=220)
-        self.utree.column("edit", width=120, anchor="center")
+        self.utree.heading("cats", text="Sichtbare Bereiche")
+        self.utree.column("name", width=150)
+        self.utree.column("edit", width=90, anchor="center")
+        self.utree.column("cats", width=220)
         self.utree.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
         side = ttk.Frame(box)
         side.grid(row=3, column=2, sticky="n", padx=(10, 0), pady=(10, 0))
         for text, cmd in (("Hinzufügen …", self.add_user),
                           ("Passwort …", self.reset_password),
                           ("Recht an/aus", self.toggle_edit),
+                          ("Bereiche …", self.edit_access),
                           ("Löschen", self.delete_user)):
             ttk.Button(side, text=text, command=cmd, width=14).pack(pady=2)
+        cats = ttk.Frame(box)
+        cats.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        cats.columnconfigure(0, weight=1)
+        self.cats_label = ttk.Label(cats, style="Mute.TLabel", wraplength=440, justify="left")
+        self.cats_label.grid(row=0, column=0, sticky="w")
+        ttk.Button(cats, text="Bereiche verwalten …", command=self.manage_categories).grid(
+            row=0, column=1, sticky="e", padx=(10, 0))
         self.refresh_users()
+
+    def user_cats_text(self, u):
+        if u["can_edit"]:
+            return "alle (darf ändern)"
+        return ", ".join(u["cats"]) if u["cats"] else "nur Einträge ohne Bereich"
 
     def refresh_users(self, select=None):
         self.utree.delete(*self.utree.get_children())
-        self.utree.insert("", "end", iid="admin", values=(f"{ADMIN_NAME} (fest)", "ja"))
+        self.utree.insert("", "end", iid="admin", values=(f"{ADMIN_NAME} (fest)", "ja", "alle"))
         for i, u in enumerate(self.users):
-            self.utree.insert("", "end", iid=str(i),
-                              values=(u["name"], "ja" if u["can_edit"] else "nein"))
+            self.utree.insert("", "end", iid=str(i), values=(
+                u["name"], "ja" if u["can_edit"] else "nein", self.user_cats_text(u)))
         if select is not None:
             self.utree.selection_set(select)
+        self.cats_label.configure(text="Bereiche: " + (", ".join(self.cats) or "keine"))
+
+    def manage_categories(self):
+        dlg = CategoryDialog(self, self.app, self.cats)
+        self.wait_window(dlg)
+        if dlg.result is None:
+            return
+        local = {old: new for new, old in dlg.result if old}
+        for u in self.users:
+            u["cats"] = [local[c] for c in u["cats"] if c in local]
+        self.cat_origin = {new: self.cat_origin.get(old) for new, old in dlg.result}
+        self.cats = [new for new, _ in dlg.result]
+        self.refresh_users()
+
+    def edit_access(self):
+        i = self.selected_user()
+        if i is None:
+            return
+        dlg = AccessDialog(self, self.app, self.users[i], self.cats)
+        self.wait_window(dlg)
+        if dlg.result is not None:
+            self.users[i]["cats"] = dlg.result
+            self.refresh_users(str(i))
 
     def selected_user(self):
         sel = self.utree.selection()
@@ -1308,7 +1709,7 @@ class DefaultDialog(tk.Toplevel):
 
     def add_user(self):
         taken = {ADMIN_NAME.lower()} | {u["name"].lower() for u in self.users}
-        dlg = UserDialog(self, self.app, taken)
+        dlg = UserDialog(self, self.app, taken, cats=self.cats)
         self.wait_window(dlg)
         if dlg.result:
             self.users.append(dlg.result)
@@ -1364,7 +1765,7 @@ class DefaultDialog(tk.Toplevel):
         folder = self.dir_var.get().strip()
         if folder:
             folder = os.path.normpath(os.path.expandvars(os.path.expanduser(folder)))
-            if not os.path.isdir(folder):
+            if not os.path.isdir(map_path(folder, NETWORK["map"])):
                 self.msg.configure(text="Der Ordner wurde nicht gefunden.")
                 return
         elif self.import_var.get():
@@ -1372,7 +1773,9 @@ class DefaultDialog(tk.Toplevel):
             return
 
         users = self.app.settings["users"]
+        cats = self.app.settings["categories"]
         if self.manage_users:
+            cats = self.cats
             p1, p2 = self.pw1.get(), self.pw2.get()
             admin_hash = self.admin_hash
             if p1 or p2 or not admin_hash:
@@ -1381,9 +1784,10 @@ class DefaultDialog(tk.Toplevel):
                     self.msg.configure(text=f"{ADMIN_NAME}-Passwort: {err}")
                     return
                 admin_hash = hash_password(p1)
-            users = [new_user(ADMIN_NAME, admin_hash, admin=True)] + self.users
+            users = [new_user(ADMIN_NAME, admin_hash, admin=True, cats=cats)] + self.users
 
         items = self.app.items
+        backup = [dict(it) for it in items]      # bei Fehlschlag beim Speichern zurücksetzen
         if len(items) > n:
             if not messagebox.askyesno(
                     APP_NAME, f"Es gibt {len(items)} Einträge, erlaubt sind {n}.\n"
@@ -1394,14 +1798,27 @@ class DefaultDialog(tk.Toplevel):
         imported = fill_from_folder(items, folder, n) if self.import_var.get() else 0
         total = len(list_excel_files(folder)) if self.import_var.get() else 0
         while len(items) < n:
-            items.append({"name": f"Auswahl {len(items) + 1}", "path": ""})
+            items.append({"name": f"Auswahl {len(items) + 1}", "path": "", "cat": ""})
+        if self.manage_users:                    # umbenannte Bereiche übernehmen, gelöschte leeren
+            renamed = {old: new for new, old in self.cat_origin.items() if old}
+            for it in items:
+                it["cat"] = renamed.get(it["cat"], "")
 
-        self.app.settings.update(max_items=n, files_dir=folder, setup_done=True, users=users)
+        old_settings = dict(self.app.settings)
+        self.app.settings.update(max_items=n, files_dir=folder, setup_done=True, users=users,
+                                 categories=cats)
         if self.first_run:
             self.app.user = users[0]             # nach der Einrichtung als Admin angemeldet
         if not self.app.save():
             if self.first_run:
                 self.app.user = None
+            if STATE["conflict"]:                # aktueller Stand wurde neu geladen
+                self.grab_release()
+                self.destroy()
+            else:
+                self.app.settings.clear()
+                self.app.settings.update(old_settings)
+                items[:] = backup
             return
         self.grab_release()
         self.destroy()
@@ -1648,6 +2065,7 @@ class App(tk.Tk):
         self.pending_update = None               # heruntergeladenes, geprüftes Update (wartet aufs Schließen)
         self.protocol("WM_DELETE_WINDOW", self.quit_app)
         self._update_checked = False            # automatische Suche nur einmal je Programmstart
+        self._watching = False                  # Netzwerk-Version: Änderungen anderer übernehmen
         self.ui_font = tkfont.nametofont("TkDefaultFont").actual("family")
         self.pal = COLOR_SCHEMES[DEFAULT_SCHEME][1]["light"]
         self.is_dark = False
@@ -1733,8 +2151,12 @@ class App(tk.Tk):
         # frisch einlesen, damit Änderungen anderer Benutzer gelten
         self.settings, self.items = load_config()
         load_prefs(self.settings)
+        if STATE["offline"]:
+            return self.login_msg.configure(text=OFFLINE_TEXT)
         if STATE["error"]:
             return self.locked()
+        if not has_admin(self.settings):         # Server war beim Start nicht erreichbar
+            return self.startup()
         user = find_user(self.settings["users"], self.login_name.get())
         if not (user and verify_password(self.login_pw.get(), user["hash"])):
             self.login_pw.set("")
@@ -1783,9 +2205,10 @@ class App(tk.Tk):
         self.show_login()
 
     def locked(self):
+        who = "Der Server-Administrator" if NETWORK["dir"] else "Ein Windows-Administrator"
         messagebox.showerror(
             APP_NAME, "Die Einstellungsdatei ist beschädigt oder wurde außerhalb von DocuBuilder "
-                      f"verändert:\n{CONFIG}\n\nEin Windows-Administrator muss die Datei löschen. "
+                      f"verändert:\n{CONFIG}\n\n{who} muss die Datei löschen. "
                       "Danach startet DocuBuilder mit der Ersteinrichtung.", parent=self)
         self.destroy()
 
@@ -1897,6 +2320,11 @@ class App(tk.Tk):
 
     def startup(self):
         cleanup_old_program()                    # Reste eines Updates der einzelnen .exe
+        if not self._watching and NETWORK["dir"]:
+            self._watching = True
+            self.after(30_000, self.watch_config)
+        if STATE["offline"]:
+            return self.show_login(OFFLINE_TEXT)
         if STATE["error"]:
             return self.locked()
         if has_admin(self.settings):
@@ -1910,6 +2338,8 @@ class App(tk.Tk):
             messagebox.showerror(APP_NAME, NO_RIGHTS, parent=self)
             return False
         if not save_config(self.settings, self.items):
+            if STATE["conflict"]:
+                self.reload_config()
             return False
         if STATE["legacy"]:                      # ältere Datei übernommen: entfernen
             save_prefs(self.settings)
@@ -1920,6 +2350,40 @@ class App(tk.Tk):
                 pass
             STATE["legacy"] = None
         return True
+
+    def reload_config(self):
+        """Aktuellen Stand der gemeinsamen Konfiguration übernehmen (z. B. nach Änderungen an einem
+        anderen Platz). Wurde der eigene Benutzer gelöscht oder sein Passwort geändert: abmelden."""
+        prefs = {k: self.settings[k] for k in ("theme", "scheme", "update_check")}
+        settings, items = load_config()
+        if STATE["error"] or STATE["offline"]:
+            return                               # beim nächsten Anmelden wird es gemeldet
+        settings.update(prefs)
+        self.settings, self.items = settings, items
+        if not self.user:
+            return
+        user = find_user(settings["users"], self.user["name"])
+        if not user or user["hash"] != self.user["hash"]:
+            self.login_name.set("")
+            self.show_login("Dein Konto wurde geändert. Bitte neu anmelden.")
+            return
+        self.user = user
+        self.build(force=True)
+        if self._alive(self.settings_win):
+            self.settings_win.refresh()
+
+    def watch_config(self):
+        """Alle 30 Sekunden prüfen, ob die gemeinsame Konfiguration geändert wurde, und neue
+        Buttons übernehmen, solange kein Fenster zum Bearbeiten offen ist."""
+        self.after(30_000, self.watch_config)
+        if not self.user or self._alive(self.default_win) or self._alive(self.settings_win):
+            return
+        try:
+            stamp = file_stamp(read_config_raw())
+        except OSError:
+            return
+        if stamp != STATE["stamp"]:
+            self.reload_config()
 
     def apply_theme(self):
         mode = self.settings["theme"]
@@ -1945,13 +2409,15 @@ class App(tk.Tk):
         p = self.pal
         for w in self.area.winfo_children():
             w.destroy()
-        if not self.items:
-            ttk.Label(self.area, text="Noch keine Einträge. Lege sie unter „Einstellungen“ an.",
-                      style="Mute.TLabel").pack(pady=30)
+        items = [it for it in self.items if visible(it, self.user)]
+        if not items:
+            text = ("Noch keine Einträge. Lege sie unter „Einstellungen“ an." if self.can_edit else
+                    "Für dich sind noch keine Einträge freigegeben. Bitte beim Admin melden.")
+            ttk.Label(self.area, text=text, style="Mute.TLabel").pack(pady=30)
             return
         for c in range(cols):
             self.area.columnconfigure(c, weight=1, uniform="t")
-        for i, it in enumerate(self.items):
+        for i, it in enumerate(items):
             b = tk.Button(self.area, text=it["name"] or "Ohne Namen", wraplength=self.TILE_W - 24,
                           height=3, relief="flat", bd=0, cursor="hand2",
                           font=(self.ui_font, 11), bg=p["panel"], fg=p["fg"],

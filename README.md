@@ -40,6 +40,52 @@ Beim Start meldet man sich mit Benutzername und Passwort an (Groß-/Kleinschreib
 
 Mit **Übernehmen** wird gespeichert. Das Konto „Admin“ kann weder gelöscht noch eingeschränkt werden.
 
+## Bereiche (wer sieht welche Vorlagen)
+Einträge lassen sich **Bereichen** zuordnen, z. B. *Arbeitsvorbereitung*, *Angebote*, *Abrechnung*. Pro Benutzer legt der Admin fest, welche Bereiche er sieht:
+- **ALT+F11** → Bereich **Benutzer** → **Bereiche verwalten …**: Bereiche anlegen, umbenennen, sortieren, löschen
+- Benutzer markieren → **Bereiche …**: Häkchen für die sichtbaren Bereiche (auch schon beim **Hinzufügen …**)
+- **Einstellungen → Einträge**: jedem Eintrag einen Bereich geben; „(alle)“ = für jeden sichtbar
+
+Beispiel: Benutzer *Werkstatt* sieht nur *Arbeitsvorbereitung*, Benutzer *Büro* sieht *Arbeitsvorbereitung*, *Angebote* und *Abrechnung*. Admin und Benutzer mit **„Darf ändern“** sehen immer alle Bereiche, weil sie die Einträge pflegen. Benutzer aus älteren Versionen sehen nach dem Update zunächst alle Bereiche.
+
+> **Wichtig:** Ausgeblendete Buttons sind kein Zugriffsschutz. Wer den Pfad kennt, kann die Datei über den Explorer öffnen. Vertrauliche Vorlagen (z. B. Abrechnung) gehören zusätzlich in einen eigenen Ordner auf dem Server, den nur die passende Windows-/AD-Gruppe lesen darf.
+
+## Netzwerk-Version (Server und Arbeitsplätze)
+DocuBuilder kann zentral auf einem Server laufen: Einträge, Benutzer, Passwörter und Bereiche liegen in **einem** gemeinsamen Ordner, alle Arbeitsplätze greifen gleichzeitig darauf zu. Jeder meldet sich an seinem Platz mit seinem DocuBuilder-Konto an und sieht nur seine Bereiche.
+
+**Windows** – beim Setup gibt es die Seite **Betriebsart**:
+| Betriebsart | Ordner | Was passiert |
+|---|---|---|
+| Einzelplatz | – | wie bisher: `C:\ProgramData\DocuBuilder` |
+| **Server** | lokaler Ordner, z. B. `D:\DocuBuilder-Daten` | Ordner wird angelegt, mit Rechten versehen und als `\\<Servername>\DocuBuilder` freigegeben |
+| **Arbeitsplatz** | Freigabe des Servers, z. B. `\\SERVER\DocuBuilder` | DocuBuilder liest und speichert dort; Desktop-Verknüpfung für alle Benutzer |
+
+Reihenfolge: 1. Setup auf dem Server (Betriebsart *Server*), DocuBuilder dort einmal starten und die Ersteinrichtung machen (Admin-Passwort, Benutzer, Bereiche, Einträge). 2. Setup auf jedem Arbeitsplatz (Betriebsart *Arbeitsplatz*, Pfad der Freigabe).
+
+Verteilung ohne Rückfragen (z. B. per Softwareverteilung/GPO):
+```
+DocuBuilder-Setup-<Version>.exe /VERYSILENT /BETRIEB=arbeitsplatz /ORDNER="\\SERVER\DocuBuilder"
+```
+`/BETRIEB` = `einzel`, `server` oder `arbeitsplatz`. Bei Updates werden Betriebsart und Ordner vom letzten Mal übernommen.
+
+**Linux** – Paket `DocuBuilder-Linux-<Version>.tar.gz` entpacken und:
+```bash
+sudo ./install.sh                                    # Einzelplatz
+sudo ./install.sh --server /srv/docubuilder          # Server (Ordner z. B. per Samba freigeben)
+sudo ./install.sh --arbeitsplatz /mnt/docubuilder --desktop
+```
+Am Arbeitsplatz muss die Freigabe eingehängt sein, z. B. in `/etc/fstab`:
+`//SERVER/DocuBuilder /mnt/docubuilder cifs credentials=/etc/docubuilder-smb,uid=0,gid=0,file_mode=0666,dir_mode=0777 0 0`
+
+Wurden die Einträge unter Windows mit Pfaden wie `\\SERVER\Vorlagen\…` angelegt, übersetzt DocuBuilder sie auf Linux-Arbeitsplätzen: `--map '\\SERVER\Vorlagen=/mnt/vorlagen'` (mehrfach möglich).
+
+**So funktioniert es:** Neben dem Programm liegt `server.txt` (erste Zeile: gemeinsamer Ordner, weitere Zeilen `Windows-Pfad = Linux-Pfad`). Ohne diese Datei läuft DocuBuilder als Einzelplatz.
+- **Gleichzeitig arbeiten:** Speichern zwei Admins fast gleichzeitig, gewinnt der erste; der zweite bekommt einen Hinweis, und DocuBuilder lädt den aktuellen Stand. Neue Buttons erscheinen an den anderen Plätzen nach spätestens 30 Sekunden.
+- **Excel-Vorlagen gleichzeitig öffnen:** am besten als Vorlage (`.xltx`/`.xltm`) ablegen. Dann öffnet jeder eine neue Kopie, und niemand sperrt die Datei. Normale `.xlsx` öffnet der zweite Benutzer schreibgeschützt.
+- **Server nicht erreichbar:** Die Anmeldung meldet das; nach dem erneuten Anmelden geht es weiter.
+- **Erste Einrichtung** auf dem Server machen: Wer zuerst einen leeren gemeinsamen Ordner öffnet, legt das Admin-Passwort fest.
+- **Rechte:** Das Setup auf dem Server gibt angemeldeten Benutzern *Ändern* auf der Freigabe; die Ordnerrechte erlauben Lesen und Überschreiben der Einstellungsdatei, aber kein Löschen. *Daten entfernen* löscht im Netzwerk nur die Einstellungsdatei, nie den Ordner.
+
 ## DocuBuilder entfernen
 Wer DocuBuilder nicht mehr verwenden will: als **Admin** anmelden → **Einstellungen → Allgemein → „DocuBuilder-Daten entfernen …“**. Nach einer Rückfrage und erneuter Eingabe des Admin-Passworts werden gelöscht:
 - die gemeinsame Konfiguration `C:\ProgramData\DocuBuilder\` (Einträge, Benutzer, Passwörter). Windows fragt dafür nach Administratorrechten (UAC).
