@@ -7,7 +7,7 @@
 
      Öffentliche Eigenschaften für stille Installation (msiexec /i ... /qn):
        DESKTOPSHORTCUT=1   Desktop-Verknüpfung anlegen
-       REMOVEDATA=1        beim Deinstallieren auch C:\ProgramData\DocuBuilder löschen
+       REMOVEDATA=1        beim Deinstallieren auch C:\ProgramData\DocuBuilder bzw. DocuBuilder-Nightly löschen
        UPDATE=1            nach der Installation DocuBuilder wieder starten (Update aus dem Programm) -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <?ifndef AppVersion?>
@@ -27,14 +27,25 @@
   <?endif?>
   <?if $(AppChannel) = "nightly"?>
     <?define VerName = "DocuBuilder $(AppVersion) (Nightly)"?>
+    <!-- Nightly läuft getrennt von Stable: eigener Ordner, eigene Verknüpfungen, eigener UpgradeCode,
+         eigene Einstellungen und eigene Taskleisten-ID. Beide Versionen lassen sich nebeneinander
+         installieren. -->
+    <?define InstallName = "DocuBuilder Nightly"?>
+    <?define DataName = "DocuBuilder-Nightly"?>
+    <?define AppUserModelId = "PatrickLange.DocuBuilder.Nightly"?>
+    <?define UpgradeCode = "7111C440-92B3-464D-B31A-316B9B6D7451"?>
   <?else?>
     <?define VerName = "DocuBuilder $(AppVersion)"?>
+    <?define InstallName = "DocuBuilder"?>
+    <?define DataName = "DocuBuilder"?>
+    <?define AppUserModelId = "PatrickLange.DocuBuilder"?>
+    <?define UpgradeCode = "3912EB95-FF31-4D11-AE0E-6D244A30E1CA"?>
   <?endif?>
 
   <!-- UpgradeCode nie ändern: daran erkennt Windows Updates und Deinstallation.
        Die ProductCode-GUID wird bei jedem Bau neu erzeugt (Id="*"). -->
   <Package Name="$(VerName)" Manufacturer="Patrick Lange" Version="$(AppVersion)"
-           UpgradeCode="3912EB95-FF31-4D11-AE0E-6D244A30E1CA" Scope="perMachine"
+           UpgradeCode="$(UpgradeCode)" Scope="perMachine"
            Language="1031" Codepage="1252" InstallerVersion="500">
 
     <SummaryInformation Description="DocuBuilder" />
@@ -45,6 +56,7 @@
     <MajorUpgrade AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="Eine neuere Version von DocuBuilder ist bereits installiert." />
 
+    <?if $(AppChannel) != "nightly"?>
     <!-- Versionen bis 1.0.x wurden mit Inno Setup installiert und lassen sich nicht überschreiben -->
     <Property Id="OLDINNOINSTALL">
       <RegistrySearch Id="OldInnoInstall" Root="HKLM" Bitness="always64"
@@ -53,6 +65,7 @@
     </Property>
     <Launch Condition="Installed OR NOT OLDINNOINSTALL"
             Message="Eine ältere, mit dem alten Installationsprogramm (.exe) installierte Version von DocuBuilder wurde gefunden. Bitte zuerst unter Windows-Einstellungen, Apps deinstallieren (Einstellungen und Einträge bleiben erhalten) und dann dieses Paket erneut starten." />
+    <?endif?>
 
     <Icon Id="DocuBuilder.ico" SourceFile="$(ProjectDir)\assets\docubuilder.ico" />
     <Property Id="ARPPRODUCTICON" Value="DocuBuilder.ico" />
@@ -64,7 +77,7 @@
 
     <!-- Dateien -->
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="DocuBuilder">
+      <Directory Id="INSTALLFOLDER" Name="$(InstallName)">
         <Component Id="ReadmeComponent" Guid="*">
           <File Id="ReadmeFile" Source="$(ProjectDir)\README.md" />
         </Component>
@@ -72,7 +85,7 @@
           <File Id="LicenseFile" Source="$(ProjectDir)\LICENSE" Name="LICENSE.txt" />
         </Component>
         <Component Id="InstallDirRegistry" Guid="*">
-          <RegistryValue Root="HKLM" Key="SOFTWARE\DocuBuilder" Name="InstallDir"
+          <RegistryValue Root="HKLM" Key="SOFTWARE\$(InstallName)" Name="InstallDir"
                          Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
         </Component>
       </Directory>
@@ -81,22 +94,22 @@
     <!-- AppUserModelID wie im Programm: angeheftetes Taskleisten-Symbol und Fenster gehören zusammen -->
     <StandardDirectory Id="ProgramMenuFolder">
       <Component Id="StartMenuShortcut" Guid="*">
-        <Shortcut Id="StartMenuShortcut" Name="DocuBuilder" Icon="DocuBuilder.ico"
+        <Shortcut Id="StartMenuShortcut" Name="$(InstallName)" Icon="DocuBuilder.ico"
                   Target="[INSTALLFOLDER]DocuBuilder.exe" WorkingDirectory="INSTALLFOLDER">
-          <ShortcutProperty Key="System.AppUserModel.ID" Value="PatrickLange.DocuBuilder" />
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="$(AppUserModelId)" />
         </Shortcut>
-        <RegistryValue Root="HKLM" Key="SOFTWARE\DocuBuilder" Name="StartMenuShortcut"
+        <RegistryValue Root="HKLM" Key="SOFTWARE\$(InstallName)" Name="StartMenuShortcut"
                        Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
 
     <StandardDirectory Id="DesktopFolder">
       <Component Id="DesktopShortcut" Guid="*">
-        <Shortcut Id="DesktopShortcut" Name="DocuBuilder" Icon="DocuBuilder.ico"
+        <Shortcut Id="DesktopShortcut" Name="$(InstallName)" Icon="DocuBuilder.ico"
                   Target="[INSTALLFOLDER]DocuBuilder.exe" WorkingDirectory="INSTALLFOLDER">
-          <ShortcutProperty Key="System.AppUserModel.ID" Value="PatrickLange.DocuBuilder" />
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="$(AppUserModelId)" />
         </Shortcut>
-        <RegistryValue Root="HKLM" Key="SOFTWARE\DocuBuilder" Name="DesktopShortcut"
+        <RegistryValue Root="HKLM" Key="SOFTWARE\$(InstallName)" Name="DesktopShortcut"
                        Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
@@ -114,14 +127,14 @@
     </Feature>
 
     <!-- Aktionen -->
-    <!-- Gemeinsamen Einstellungsordner (C:\ProgramData\DocuBuilder) mit den passenden Rechten anlegen -->
+    <!-- Gemeinsamen Einstellungsordner (C:\ProgramData\$(DataName)) mit den passenden Rechten anlegen -->
     <CustomAction Id="SetupMachine" Directory="INSTALLFOLDER"
                   ExeCommand="&quot;[INSTALLFOLDER]DocuBuilder.exe&quot; --setup-machine"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- Einstellungen auf Wunsch (REMOVEDATA=1) beim Deinstallieren löschen; bei Updates nie -->
     <CustomAction Id="RemoveData" Directory="INSTALLFOLDER"
-                  ExeCommand="&quot;[SystemFolder]cmd.exe&quot; /c attrib -R -H &quot;[CommonAppDataFolder]DocuBuilder\*&quot; &amp; rmdir /s /q &quot;[CommonAppDataFolder]DocuBuilder&quot;"
+                  ExeCommand="&quot;[SystemFolder]cmd.exe&quot; /c attrib -R -H &quot;[CommonAppDataFolder]$(DataName)\*&quot; &amp; rmdir /s /q &quot;[CommonAppDataFolder]$(DataName)&quot;"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- Update aus DocuBuilder: Programm danach wieder starten. Über den Explorer, damit es mit dessen
