@@ -1,5 +1,7 @@
 # DocuBuilder
 
+> Update-Test: Diese Zeile dient nur zum Testen der Update-Funktion.
+
 Kleines Desktop-Tool für Windows und Linux: Eine Auswahl an Buttons, jeder Button öffnet eine hinterlegte Excel-Liste. Einträge lassen sich im Einstellungsfenster beliebig hinzufügen, ändern, löschen und sortieren.
 
 ## Funktionen
