@@ -84,7 +84,7 @@ jobs:
           python tools/make_license_rtf.py
           wix build -arch x64 -ext WixToolset.UI.wixext `
             -d AppVersion=${{ inputs.version }} -d AppChannel=${{ inputs.channel }} `
-            -d DistDir="$PWD\dist" -d LicenseRtf="$PWD\build\License.rtf" `
+            -d ProjectDir="$PWD" -d DistDir="$PWD\dist" -d LicenseRtf="$PWD\build\License.rtf" `
             installer\DocuBuilder.wxs -o "dist\DocuBuilder-Setup-${{ inputs.version }}.msi"
           if ($LASTEXITCODE) { throw "WiX fehlgeschlagen" }
 

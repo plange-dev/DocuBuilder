@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Windows-Installer-Paket (.msi) für DocuBuilder, gebaut mit WiX Toolset v5.
      Bauen: build_installer.bat (oder: wix build -arch x64 -ext WixToolset.UI.wixext
-            -d AppVersion=1.0.0.0 -d AppChannel=stable -d DistDir=dist -d LicenseRtf=build\License.rtf
+            -d AppVersion=1.0.0.0 -d AppChannel=stable -d ProjectDir=. -d DistDir=dist -d LicenseRtf=build\License.rtf
             installer\DocuBuilder.wxs -o dist\DocuBuilder-Setup-1.0.0.0.msi)
      Erwartet den Programmordner dist\DocuBuilder\ (PyInstaller onedir).
 
@@ -16,11 +16,14 @@
   <?ifndef AppChannel?>
     <?define AppChannel = "stable"?>
   <?endif?>
+  <?ifndef ProjectDir?>
+    <?define ProjectDir = "."?>
+  <?endif?>
   <?ifndef DistDir?>
-    <?define DistDir = "..\dist"?>
+    <?define DistDir = "dist"?>
   <?endif?>
   <?ifndef LicenseRtf?>
-    <?define LicenseRtf = "..\build\License.rtf"?>
+    <?define LicenseRtf = "build\License.rtf"?>
   <?endif?>
   <?if $(AppChannel) = "nightly"?>
     <?define VerName = "DocuBuilder $(AppVersion) (Nightly)"?>
@@ -51,7 +54,7 @@
     <Launch Condition="Installed OR NOT OLDINNOINSTALL"
             Message="Eine ältere, mit dem alten Installationsprogramm (.exe) installierte Version von DocuBuilder wurde gefunden. Bitte zuerst unter Windows-Einstellungen → Apps deinstallieren (Einstellungen und Einträge bleiben erhalten) und dann dieses Paket erneut starten." />
 
-    <Icon Id="DocuBuilder.ico" SourceFile="..\assets\docubuilder.ico" />
+    <Icon Id="DocuBuilder.ico" SourceFile="$(ProjectDir)\assets\docubuilder.ico" />
     <Property Id="ARPPRODUCTICON" Value="DocuBuilder.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/plange-dev/DocuBuilder" />
 
@@ -63,10 +66,10 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="DocuBuilder">
         <Component Id="ReadmeComponent" Guid="*">
-          <File Id="ReadmeFile" Source="..\README.md" />
+          <File Id="ReadmeFile" Source="$(ProjectDir)\README.md" />
         </Component>
         <Component Id="LicenseComponent" Guid="*">
-          <File Id="LicenseFile" Source="..\LICENSE" Name="LICENSE.txt" />
+          <File Id="LicenseFile" Source="$(ProjectDir)\LICENSE" Name="LICENSE.txt" />
         </Component>
         <Component Id="InstallDirRegistry" Guid="*">
           <RegistryValue Root="HKLM" Key="SOFTWARE\DocuBuilder" Name="InstallDir"
