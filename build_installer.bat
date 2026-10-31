@@ -38,7 +38,7 @@ if defined DOCUBUILDER_CERT_SHA1 (
 where wix >nul 2>&1 || goto :kein_wix
 wix extension list -g | findstr /i "WixToolset.UI.wixext" >nul || wix extension add -g WixToolset.UI.wixext/5.0.2 || goto :fehler
 py tools\make_license_rtf.py || goto :fehler
-wix build -arch x64 -ext WixToolset.UI.wixext -d AppVersion=%VER% -d AppChannel=%CHANNEL% -d ProjectDir="%ROOT%." -d DistDir="%ROOT%dist" -d LicenseRtf="%ROOT%build\License.rtf" installer\DocuBuilder.wxs -o dist\DocuBuilder-Setup-%VER%.msi || goto :fehler
+wix build -arch x64 -ext WixToolset.UI.wixext -culture de-DE -d AppVersion=%VER% -d AppChannel=%CHANNEL% -d ProjectDir="%ROOT%." -d DistDir="%ROOT%dist" -d LicenseRtf="%ROOT%build\License.rtf" installer\DocuBuilder.wxs -o dist\DocuBuilder-Setup-%VER%.msi || goto :fehler
 if defined DOCUBUILDER_CERT_SHA1 call tools\signfile.bat dist\DocuBuilder-Setup-%VER%.msi || goto :fehler
 
 for %%F in ("dist\DocuBuilder.exe" "dist\DocuBuilder-Setup-%VER%.msi") do (

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Windows-Installer-Paket (.msi) für DocuBuilder, gebaut mit WiX Toolset v5.
-     Bauen: build_installer.bat (oder: wix build -arch x64 -ext WixToolset.UI.wixext
+     Bauen: build_installer.bat (oder: wix build -arch x64 -ext WixToolset.UI.wixext -culture de-DE
             -d AppVersion=1.0.0.0 -d AppChannel=stable -d ProjectDir=. -d DistDir=dist -d LicenseRtf=build\License.rtf
             installer\DocuBuilder.wxs -o dist\DocuBuilder-Setup-1.0.0.0.msi)
      Erwartet den Programmordner dist\DocuBuilder\ (PyInstaller onedir).
@@ -146,6 +146,9 @@
 
     <!-- Oberfläche -->
     <WixVariable Id="WixUILicenseRtf" Value="$(LicenseRtf)" />
+    <!-- Bilder im Design von DocuBuilder (erzeugt mit tools/make_installer_images.py) -->
+    <WixVariable Id="WixUIBannerBmp" Value="$(ProjectDir)\assets\installer-banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(ProjectDir)\assets\installer-dialog.bmp" />
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="DocuBuilder starten" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
