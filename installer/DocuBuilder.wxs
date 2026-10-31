@@ -62,9 +62,13 @@
     <!-- Dateien -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="DocuBuilder">
-        <Component Id="ProgramInfo" Guid="*">
+        <Component Id="ReadmeComponent" Guid="*">
           <File Id="ReadmeFile" Source="..\README.md" />
+        </Component>
+        <Component Id="LicenseComponent" Guid="*">
           <File Id="LicenseFile" Source="..\LICENSE" Name="LICENSE.txt" />
+        </Component>
+        <Component Id="InstallDirRegistry" Guid="*">
           <RegistryValue Root="HKLM" Key="SOFTWARE\DocuBuilder" Name="InstallDir"
                          Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
         </Component>
@@ -96,7 +100,9 @@
 
     <Feature Id="Main" Title="DocuBuilder" Level="1" AllowAbsent="no">
       <ComponentGroupRef Id="ProductFiles" />
-      <ComponentRef Id="ProgramInfo" />
+      <ComponentRef Id="ReadmeComponent" />
+      <ComponentRef Id="LicenseComponent" />
+      <ComponentRef Id="InstallDirRegistry" />
       <ComponentRef Id="StartMenuShortcut" />
     </Feature>
     <Feature Id="DesktopIcon" Title="Desktop-Verknüpfung" Level="2" Display="hidden">
