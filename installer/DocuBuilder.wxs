@@ -3,7 +3,7 @@
      Bauen: build_installer.bat (oder: wix build -arch x64 -ext WixToolset.UI.wixext
             -d AppVersion=1.0.0.0 -d AppChannel=stable -d DistDir=dist -d LicenseRtf=build\License.rtf
             installer\DocuBuilder.wxs -o dist\DocuBuilder-Setup-1.0.0.0.msi)
-     Erwartet den Programmordner dist\DocuBuilder\ (PyInstaller --onedir).
+     Erwartet den Programmordner dist\DocuBuilder\ (PyInstaller onedir).
 
      Öffentliche Eigenschaften für stille Installation (msiexec /i ... /qn):
        DESKTOPSHORTCUT=1   Desktop-Verknüpfung anlegen
@@ -44,7 +44,7 @@
 
     <!-- Versionen bis 1.0.x wurden mit Inno Setup installiert und lassen sich nicht überschreiben -->
     <Property Id="OLDINNOINSTALL">
-      <RegistrySearch Id="OldInnoInstall" Root="HKLM" Win64="yes"
+      <RegistrySearch Id="OldInnoInstall" Root="HKLM" Bitness="always64"
                       Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{3912EB95-FF31-4D11-AE0E-6D244A30E1CA}_is1"
                       Name="UninstallString" Type="raw" />
     </Property>
@@ -59,7 +59,7 @@
     <Property Id="REMOVEDATA" Secure="yes" />
     <Property Id="UPDATE" Secure="yes" />
 
-    <!-- ------------------------------------------------------------ Dateien -->
+    <!-- Dateien -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="DocuBuilder">
         <Component Id="ProgramInfo" Guid="*">
@@ -104,14 +104,14 @@
       <ComponentRef Id="DesktopShortcut" />
     </Feature>
 
-    <!-- ------------------------------------------------------------ Aktionen -->
+    <!-- Aktionen -->
     <!-- Gemeinsamen Einstellungsordner (C:\ProgramData\DocuBuilder) mit den passenden Rechten anlegen -->
     <CustomAction Id="SetupMachine" Directory="INSTALLFOLDER"
                   ExeCommand="&quot;[INSTALLFOLDER]DocuBuilder.exe&quot; --setup-machine"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- Einstellungen auf Wunsch (REMOVEDATA=1) beim Deinstallieren löschen; bei Updates nie -->
-    <CustomAction Id="RemoveData" Directory="TempFolder"
+    <CustomAction Id="RemoveData" Directory="INSTALLFOLDER"
                   ExeCommand="&quot;[SystemFolder]cmd.exe&quot; /c attrib -R -H &quot;[CommonAppDataFolder]DocuBuilder\*&quot; &amp; rmdir /s /q &quot;[CommonAppDataFolder]DocuBuilder&quot;"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
@@ -135,7 +135,7 @@
               Condition="UPDATE=&quot;1&quot; AND NOT REMOVE" />
     </InstallExecuteSequence>
 
-    <!-- ------------------------------------------------------------ Oberfläche -->
+    <!-- Oberfläche -->
     <WixVariable Id="WixUILicenseRtf" Value="$(LicenseRtf)" />
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="DocuBuilder starten" />
@@ -148,7 +148,7 @@
   </Package>
 
   <Fragment>
-    <!-- Programmordner (PyInstaller --onedir): DocuBuilder.exe und _internal\ -->
+    <!-- Programmordner (PyInstaller onedir): DocuBuilder.exe und _internal\ -->
     <ComponentGroup Id="ProductFiles" Directory="INSTALLFOLDER">
       <Files Include="$(DistDir)\DocuBuilder\**" />
     </ComponentGroup>
