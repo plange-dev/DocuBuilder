@@ -76,15 +76,17 @@ jobs:
             if ($sig.Status -ne 'Valid') { throw "Signatur ungültig: $f ($($sig.Status))" }
           }
 
-      - name: Installationsprogramm bauen
+      - name: Installationspaket (MSI) bauen
         shell: pwsh
         run: |
-          choco install innosetup -y --no-progress
-          $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") |
-            Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $iscc) { throw "ISCC.exe nicht gefunden" }
-          & $iscc "/DAppVersion=${{ inputs.version }}" "/DAppChannel=${{ inputs.channel }}" installer\DocuBuilder.iss
-          if ($LASTEXITCODE) { throw "Inno Setup fehlgeschlagen" }
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+          python tools/make_license_rtf.py
+          wix build -arch x64 -ext WixToolset.UI.wixext `
+            -d AppVersion=${{ inputs.version }} -d AppChannel=${{ inputs.channel }} `
+            -d DistDir="$PWD\dist" -d LicenseRtf="$PWD\build\License.rtf" `
+            installer\DocuBuilder.wxs -o "dist\DocuBuilder-Setup-${{ inputs.version }}.msi"
+          if ($LASTEXITCODE) { throw "WiX fehlgeschlagen" }
 
       # Setup ebenfalls signieren (sonst blockiert z. B. Smart App Control das Update).
       # Nur, wenn dafür eine eigene Artifact Configuration hinterlegt ist
@@ -94,7 +96,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory setup-unsigned | Out-Null
-          Copy-Item "dist\DocuBuilder-Setup-${{ inputs.version }}.exe" setup-unsigned\DocuBuilder-Setup.exe
+          Copy-Item "dist\DocuBuilder-Setup-${{ inputs.version }}.msi" setup-unsigned\DocuBuilder-Setup.msi
 
       - name: Unsigniertes Setup hochladen
         id: unsigned_setup
@@ -102,7 +104,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: unsigned-setup
-          path: setup-unsigned/DocuBuilder-Setup.exe
+          path: setup-unsigned/DocuBuilder-Setup.msi
 
       - name: Setup mit SignPath signieren
         id: sign_setup
@@ -124,8 +126,8 @@ jobs:
         run: |
           $zip = Get-ChildItem signed-setup -Filter *.zip -ErrorAction SilentlyContinue
           if ($zip) { Expand-Archive $zip.FullName -DestinationPath signed-setup -Force }
-          $target = "dist\DocuBuilder-Setup-${{ inputs.version }}.exe"
-          Copy-Item signed-setup\DocuBuilder-Setup.exe $target -Force
+          $target = "dist\DocuBuilder-Setup-${{ inputs.version }}.msi"
+          Copy-Item signed-setup\DocuBuilder-Setup.msi $target -Force
           $sig = Get-AuthenticodeSignature $target
           Write-Host "Signaturstatus Setup: $($sig.Status)"
           if ($sig.Status -ne 'Valid') { throw "Signatur des Setups ungültig: $($sig.Status)" }
@@ -133,7 +135,7 @@ jobs:
       - name: Prüfsummen erzeugen
         shell: pwsh
         run: |
-          Get-ChildItem dist -Filter *.exe | ForEach-Object {
+          Get-ChildItem dist -File | Where-Object { $_.Extension -in ".exe", ".msi" } | ForEach-Object {
             $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
             "$h  $($_.Name)" | Out-File -Encoding ascii "$($_.FullName).sha256"
           }
@@ -143,7 +145,8 @@ jobs:
           name: windows
           path: |
             dist/*.exe
-            dist/*.exe.sha256
+            dist/*.msi
+            dist/*.sha256
 
   linux:
     runs-on: ubuntu-latest

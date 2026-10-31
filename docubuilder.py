@@ -534,19 +534,30 @@ def find_update(channel=APP_CHANNEL, current=APP_VERSION, releases=None):
     return best
 
 
+def _msi_installed():
+    """True, wenn dieser Programmordner vom MSI-Paket angelegt wurde (Registrierung durch das Paket)."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\DocuBuilder") as k:
+            folder = winreg.QueryValueEx(k, "InstallDir")[0]
+    except (ImportError, OSError):
+        return False
+    return os.path.normcase(os.path.normpath(folder)) == os.path.normcase(os.path.normpath(app_dir()))
+
+
 def install_mode():
     """setup: mit dem Installationsprogramm installiert; replace: einzelne Programmdatei;
     source: als Python-Skript gestartet (kein automatisches Update)."""
     if not getattr(sys, "frozen", False):
         return "source"
-    if WIN and os.path.exists(os.path.join(app_dir(), "unins000.exe")):
+    if WIN and (os.path.exists(os.path.join(app_dir(), "unins000.exe")) or _msi_installed()):
         return "setup"
     return "replace"
 
 
 def update_asset(update, mode):
     if mode == "setup":
-        return f"DocuBuilder-Setup-{fmt_version(update['version'])}.exe"
+        return f"DocuBuilder-Setup-{fmt_version(update['version'])}.msi"
     return "DocuBuilder.exe" if WIN else "DocuBuilder"
 
 
@@ -604,11 +615,14 @@ def program_pid():
 
 
 def start_setup(path):
-    """Installationsprogramm ohne Rückfragen starten; Windows fragt nach Adminrechten (UAC).
-    /WAITPID: das Setup wartet, bis dieses DocuBuilder beendet ist, bevor es Dateien ersetzt.
-    /UPDATE=1: das Setup startet DocuBuilder danach wieder (siehe installer/DocuBuilder.iss)."""
-    os.startfile(path, "open", "/SILENT /SP- /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS "
-                               f"/UPDATE=1 /WAITPID={program_pid()}")
+    """MSI-Paket ohne Rückfragen installieren; Windows fragt nach Adminrechten (UAC).
+    Zuerst wird gewartet, bis dieses DocuBuilder beendet ist (höchstens 60 Sekunden), damit keine
+    Dateien in Benutzung sind. UPDATE=1: das Paket startet DocuBuilder danach wieder
+    (siehe installer/DocuBuilder.wxs)."""
+    script = (f"Wait-Process -Id {program_pid()} -Timeout 60 -ErrorAction SilentlyContinue; "
+              f"& msiexec.exe /i '{path}' /qb! /norestart UPDATE=1")
+    os.startfile("powershell.exe", "runas",
+                 f'-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command "{script}"')
 
 
 def install_error_text(e):
