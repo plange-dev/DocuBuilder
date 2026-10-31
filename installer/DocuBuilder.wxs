@@ -52,7 +52,7 @@
                       Name="UninstallString" Type="raw" />
     </Property>
     <Launch Condition="Installed OR NOT OLDINNOINSTALL"
-            Message="Eine ältere, mit dem alten Installationsprogramm (.exe) installierte Version von DocuBuilder wurde gefunden. Bitte zuerst unter Windows-Einstellungen → Apps deinstallieren (Einstellungen und Einträge bleiben erhalten) und dann dieses Paket erneut starten." />
+            Message="Eine ältere, mit dem alten Installationsprogramm (.exe) installierte Version von DocuBuilder wurde gefunden. Bitte zuerst unter Windows-Einstellungen, Apps deinstallieren (Einstellungen und Einträge bleiben erhalten) und dann dieses Paket erneut starten." />
 
     <Icon Id="DocuBuilder.ico" SourceFile="$(ProjectDir)\assets\docubuilder.ico" />
     <Property Id="ARPPRODUCTICON" Value="DocuBuilder.ico" />
