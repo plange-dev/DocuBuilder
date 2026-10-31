@@ -28,9 +28,9 @@ APP_CHANNEL = "stable"
 APP_TITLE = APP_NAME + (" Nightly" if APP_CHANNEL == "nightly" else "")
 # Ordnername für Einstellungen: Nightly läuft getrennt von Stable und teilt keine Daten mit ihm.
 DATA_NAME = APP_NAME + ("-Nightly" if APP_CHANNEL == "nightly" else "")
-# Update-Funktion erst freischalten, wenn DocuBuilder signiert ausgeliefert wird (siehe CODE_SIGNING.md):
-# unsignierte Updates blockiert Smart App Control.
-UPDATES_ENABLED = False
+# Update-Funktion: in Nightly-Builds aktiv. Für Stable erst freischalten, wenn DocuBuilder signiert
+# ausgeliefert wird (siehe CODE_SIGNING.md): unsignierte Updates blockiert Smart App Control.
+UPDATES_ENABLED = APP_CHANNEL == "nightly"
 
 ADMIN_NAME = "Admin"                       # festes Konto, kann nicht gelöscht werden
 MIN_PW_LEN = 4
@@ -518,14 +518,15 @@ def _http(url, timeout=20):
 
 def find_update(channel=APP_CHANNEL, current=APP_VERSION, releases=None):
     """Neuestes Release, das neuer ist als die laufende Version, sonst None.
-    Stable sieht nur Stable-Releases, Nightly zusätzlich die Vorabversionen."""
+    Jeder Kanal sieht nur die Releases des eigenen Kanals (Stable nur Stable, Nightly nur Vorabversionen),
+    weil beide getrennt installiert sind und ein Stable-Paket die Nightly-Installation nicht ersetzt."""
     if releases is None:
         with _http(RELEASES_API) as r:
             releases = json.loads(r.read().decode("utf-8"))
     cur = parse_version(current)
     best = None
     for rel in releases:
-        if rel.get("draft") or (rel.get("prerelease") and channel != "nightly"):
+        if rel.get("draft") or bool(rel.get("prerelease")) != (channel == "nightly"):
             continue
         v = parse_version(rel.get("tag_name"))
         if v and v > cur and (best is None or v > best["version"]):
