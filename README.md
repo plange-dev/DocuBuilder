@@ -68,13 +68,15 @@ python3 docubuilder.py       # Linux (benötigt python3-tk)
 Unter **Releases** liegen `DocuBuilder.exe` (Windows) und `DocuBuilder` (Linux).
 
 ## Installieren (Windows)
-`DocuBuilder-Setup-<Version>.exe` aus den **Releases** starten. Das Installationsprogramm
+`DocuBuilder-Setup-<Version>.msi` aus den **Releases** starten. Das Installationspaket (Windows Installer)
 - installiert nach `C:\Program Files\DocuBuilder` (Administratorrechte nötig),
 - legt einen Eintrag im Startmenü an (Desktop-Verknüpfung optional),
 - richtet den geschützten Einstellungsordner `C:\ProgramData\DocuBuilder` ein; ein Start „als Administrator“ ist danach nicht mehr nötig,
 - installiert neuere Versionen einfach über die alte; Einträge und Benutzer bleiben erhalten.
 
-**Deinstallieren:** Windows-Einstellungen → Apps → Installierte Apps → DocuBuilder → Deinstallieren. Dabei wird gefragt, ob auch die Einstellungen (Einträge, Benutzer, Passwörter) gelöscht werden sollen.
+**Deinstallieren:** Windows-Einstellungen → Apps → Installierte Apps → DocuBuilder → Deinstallieren. Die Einstellungen (Einträge, Benutzer, Passwörter) bleiben dabei erhalten; mit `msiexec /x DocuBuilder-Setup-<Version>.msi REMOVEDATA=1` werden sie mitgelöscht.
+
+Stille Installation für die Softwareverteilung: `msiexec /i DocuBuilder-Setup-<Version>.msi /qn` (optional `DESKTOPSHORTCUT=1` für eine Desktop-Verknüpfung). Versionen bis 1.0.x wurden mit dem früheren Installationsprogramm (.exe) installiert; diese vorher über Windows-Einstellungen → Apps deinstallieren (Einstellungen bleiben erhalten).
 
 Alternativ gibt es weiterhin die einzelne `DocuBuilder.exe` ohne Installation.
 
@@ -86,12 +88,12 @@ Alternativ gibt es weiterhin die einzelne `DocuBuilder.exe` ohne Installation.
 - Gibt es eine neuere Version, zeigt das Fenster die Änderungen. Das Update läuft in zwei Schritten (nur für den **Admin**):
   1. **Herunterladen:** lädt das Update und prüft die SHA-256-Prüfsumme. DocuBuilder kann dabei weiter benutzt werden.
   2. **DocuBuilder schließen und installieren:** Nach einer Rückfrage wird DocuBuilder geschlossen; erst dann wird installiert. Mit **Später** bleibt das Update bereit – beim Beenden von DocuBuilder wird noch einmal gefragt, ob es jetzt installiert werden soll.
-  - **Installierte Version:** Das Setup wartet, bis DocuBuilder beendet ist, und läuft dann ohne Rückfragen; Windows fragt nach Administratorrechten. Danach startet DocuBuilder neu. Einträge und Benutzer bleiben erhalten.
+  - **Installierte Version:** Das Installationspaket wartet, bis DocuBuilder beendet ist, und läuft dann ohne Rückfragen; Windows fragt nach Administratorrechten. Danach startet DocuBuilder neu. Einträge und Benutzer bleiben erhalten.
   - **Einzelne `DocuBuilder.exe`:** Die Datei wird ausgetauscht und neu gestartet. Dafür braucht DocuBuilder Schreibrechte im eigenen Ordner.
 - Optional: *Einstellungen → Allgemein → „Beim Anmelden nach Updates suchen“* (standardmäßig aus) meldet sich nur, wenn es ein Update gibt.
 
 ## Selbst bauen
-- Windows-Installationsprogramm: `build_installer.bat` doppelklicken (benötigt Inno Setup 6: `winget install JRSoftware.InnoSetup`), Ergebnis `dist\DocuBuilder-Setup-<Version>.exe` und die portable `dist\DocuBuilder.exe`, jeweils mit Prüfsumme. Mit gesetztem `DOCUBUILDER_CERT_SHA1` wird alles signiert (siehe [CODE_SIGNING.md](CODE_SIGNING.md)).
+- Windows-Installationsprogramm: `build_installer.bat` doppelklicken (benötigt das WiX Toolset 5: `dotnet tool install --global wix --version 5.0.2`), Ergebnis `dist\DocuBuilder-Setup-<Version>.msi` und die portable `dist\DocuBuilder.exe`, jeweils mit Prüfsumme. Mit gesetztem `DOCUBUILDER_CERT_SHA1` wird alles signiert (siehe [CODE_SIGNING.md](CODE_SIGNING.md)).
 - Windows: `build_windows.bat` doppelklicken, Ergebnis in `dist\`
 - Icon: Vorlagen sind `assets/docubuilder.svg` (groß) und `assets/docubuilder-small.svg` (bis 32 px). Nach Änderungen `python tools/make_icons.py` ausführen (benötigt `pip install resvg-py pillow`); das erzeugt `assets/docubuilder.ico` und `assets/docubuilder.png`, die im Repo liegen.
 - Windows signieren: `sign_windows.bat <Fingerprint>` (siehe CODE_SIGNING.md)

@@ -66,8 +66,8 @@ jobs:
           files: |
             out/windows/DocuBuilder.exe
             out/windows/DocuBuilder.exe.sha256
-            out/windows/DocuBuilder-Setup-*.exe
-            out/windows/DocuBuilder-Setup-*.exe.sha256
+            out/windows/DocuBuilder-Setup-*.msi
+            out/windows/DocuBuilder-Setup-*.msi.sha256
             out/linux/DocuBuilder
             out/linux/DocuBuilder.sha256
 

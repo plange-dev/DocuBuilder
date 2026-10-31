@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Windows-Installer-Paket (.msi) für DocuBuilder, gebaut mit WiX Toolset v5.
+     Bauen: build_installer.bat (oder: wix build -arch x64 -ext WixToolset.UI.wixext
+            -d AppVersion=1.0.0.0 -d AppChannel=stable -d ProjectDir=. -d DistDir=dist -d LicenseRtf=build\License.rtf
+            installer\DocuBuilder.wxs -o dist\DocuBuilder-Setup-1.0.0.0.msi)
+     Erwartet den Programmordner dist\DocuBuilder\ (PyInstaller onedir).
+
+     Öffentliche Eigenschaften für stille Installation (msiexec /i ... /qn):
+       DESKTOPSHORTCUT=1   Desktop-Verknüpfung anlegen
+       REMOVEDATA=1        beim Deinstallieren auch C:\ProgramData\DocuBuilder löschen
+       UPDATE=1            nach der Installation DocuBuilder wieder starten (Update aus dem Programm) -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <?ifndef AppVersion?>
+    <?define AppVersion = "1.0.0.0"?>
+  <?endif?>
+  <?ifndef AppChannel?>
+    <?define AppChannel = "stable"?>
+  <?endif?>
+  <?ifndef ProjectDir?>
+    <?define ProjectDir = "."?>
+  <?endif?>
+  <?ifndef DistDir?>
+    <?define DistDir = "dist"?>
+  <?endif?>
+  <?ifndef LicenseRtf?>
+    <?define LicenseRtf = "build\License.rtf"?>
+  <?endif?>
+  <?if $(AppChannel) = "nightly"?>
+    <?define VerName = "DocuBuilder $(AppVersion) (Nightly)"?>
+  <?else?>
+    <?define VerName = "DocuBuilder $(AppVersion)"?>
+  <?endif?>
+
+  <!-- UpgradeCode nie ändern: daran erkennt Windows Updates und Deinstallation.
+       Die ProductCode-GUID wird bei jedem Bau neu erzeugt (Id="*"). -->
+  <Package Name="$(VerName)" Manufacturer="Patrick Lange" Version="$(AppVersion)"
+           UpgradeCode="3912EB95-FF31-4D11-AE0E-6D244A30E1CA" Scope="perMachine"
+           Language="1031" Codepage="1252" InstallerVersion="500">
+
+    <SummaryInformation Description="DocuBuilder" />
+    <Media Id="1" Cabinet="DocuBuilder.cab" EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Die vierte Versionsstelle ignoriert Windows Installer; Nightly-Builds (1.0.0.1, 1.0.0.2 ...)
+         unterscheiden sich nur dort. Deshalb gleiche Versionen als Update zulassen. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Eine neuere Version von DocuBuilder ist bereits installiert." />
+
+    <!-- Versionen bis 1.0.x wurden mit Inno Setup installiert und lassen sich nicht überschreiben -->
+    <Property Id="OLDINNOINSTALL">
+      <RegistrySearch Id="OldInnoInstall" Root="HKLM" Bitness="always64"
+                      Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{3912EB95-FF31-4D11-AE0E-6D244A30E1CA}_is1"
+                      Name="UninstallString" Type="raw" />
+    </Property>
+    <Launch Condition="Installed OR NOT OLDINNOINSTALL"
+            Message="Eine ältere, mit dem alten Installationsprogramm (.exe) installierte Version von DocuBuilder wurde gefunden. Bitte zuerst unter Windows-Einstellungen, Apps deinstallieren (Einstellungen und Einträge bleiben erhalten) und dann dieses Paket erneut starten." />
+
+    <Icon Id="DocuBuilder.ico" SourceFile="$(ProjectDir)\assets\docubuilder.ico" />
+    <Property Id="ARPPRODUCTICON" Value="DocuBuilder.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/plange-dev/DocuBuilder" />
+
+    <Property Id="DESKTOPSHORTCUT" Secure="yes" />
+    <Property Id="REMOVEDATA" Secure="yes" />
+    <Property Id="UPDATE" Secure="yes" />
+
+    <!-- Dateien -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="DocuBuilder">
+        <Component Id="ReadmeComponent" Guid="*">
+          <File Id="ReadmeFile" Source="$(ProjectDir)\README.md" />
+        </Component>
+        <Component Id="LicenseComponent" Guid="*">
+          <File Id="LicenseFile" Source="$(ProjectDir)\LICENSE" Name="LICENSE.txt" />
+        </Component>
+        <Component Id="InstallDirRegistry" Guid="*">
+          <RegistryValue Root="HKLM" Key="SOFTWARE\DocuBuilder" Name="InstallDir"
+                         Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <!-- AppUserModelID wie im Programm: angeheftetes Taskleisten-Symbol und Fenster gehören zusammen -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="StartMenuShortcut" Name="DocuBuilder" Icon="DocuBuilder.ico"
+                  Target="[INSTALLFOLDER]DocuBuilder.exe" WorkingDirectory="INSTALLFOLDER">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="PatrickLange.DocuBuilder" />
+        </Shortcut>
+        <RegistryValue Root="HKLM" Key="SOFTWARE\DocuBuilder" Name="StartMenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*">
+        <Shortcut Id="DesktopShortcut" Name="DocuBuilder" Icon="DocuBuilder.ico"
+                  Target="[INSTALLFOLDER]DocuBuilder.exe" WorkingDirectory="INSTALLFOLDER">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="PatrickLange.DocuBuilder" />
+        </Shortcut>
+        <RegistryValue Root="HKLM" Key="SOFTWARE\DocuBuilder" Name="DesktopShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="DocuBuilder" Level="1" AllowAbsent="no">
+      <ComponentGroupRef Id="ProductFiles" />
+      <ComponentRef Id="ReadmeComponent" />
+      <ComponentRef Id="LicenseComponent" />
+      <ComponentRef Id="InstallDirRegistry" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+    <Feature Id="DesktopIcon" Title="Desktop-Verknüpfung" Level="2" Display="hidden">
+      <Level Value="1" Condition="DESKTOPSHORTCUT = &quot;1&quot;" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- Aktionen -->
+    <!-- Gemeinsamen Einstellungsordner (C:\ProgramData\DocuBuilder) mit den passenden Rechten anlegen -->
+    <CustomAction Id="SetupMachine" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]DocuBuilder.exe&quot; --setup-machine"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!-- Einstellungen auf Wunsch (REMOVEDATA=1) beim Deinstallieren löschen; bei Updates nie -->
+    <CustomAction Id="RemoveData" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[SystemFolder]cmd.exe&quot; /c attrib -R -H &quot;[CommonAppDataFolder]DocuBuilder\*&quot; &amp; rmdir /s /q &quot;[CommonAppDataFolder]DocuBuilder&quot;"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!-- Update aus DocuBuilder: Programm danach wieder starten. Über den Explorer, damit es mit dessen
+         sauberer Umgebung startet und nicht die Variablen des alten DocuBuilder erbt
+         (sonst "Failed to load Python DLL ... _MEI..."). -->
+    <CustomAction Id="RelaunchAfterUpdate" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[WindowsFolder]explorer.exe&quot; &quot;[INSTALLFOLDER]DocuBuilder.exe&quot;"
+                  Execute="immediate" Impersonate="yes" Return="asyncNoWait" />
+
+    <!-- Programm nach der Installation als normaler Benutzer starten (Haken auf der letzten Seite) -->
+    <CustomAction Id="LaunchApp" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[WindowsFolder]explorer.exe&quot; &quot;[INSTALLFOLDER]DocuBuilder.exe&quot;"
+                  Execute="immediate" Impersonate="yes" Return="asyncNoWait" />
+
+    <InstallExecuteSequence>
+      <Custom Action="SetupMachine" Before="InstallFinalize" Condition="NOT REMOVE" />
+      <Custom Action="RemoveData" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND REMOVEDATA=&quot;1&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="RelaunchAfterUpdate" After="InstallFinalize"
+              Condition="UPDATE=&quot;1&quot; AND NOT REMOVE" />
+    </InstallExecuteSequence>
+
+    <!-- Oberfläche -->
+    <WixVariable Id="WixUILicenseRtf" Value="$(LicenseRtf)" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="DocuBuilder starten" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <ui:WixUI Id="WixUI_InstallDir" />
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApp"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+    </UI>
+  </Package>
+
+  <Fragment>
+    <!-- Programmordner (PyInstaller onedir): DocuBuilder.exe und _internal\ -->
+    <ComponentGroup Id="ProductFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(DistDir)\DocuBuilder\**" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>
