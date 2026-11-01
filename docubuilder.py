@@ -26,9 +26,11 @@ APP_NAME = "DocuBuilder"
 APP_VERSION = "1.2.0.0"
 APP_CHANNEL = "stable"
 APP_TITLE = APP_NAME + (" Nightly" if APP_CHANNEL == "nightly" else "")
-# Update-Funktion erst freischalten, wenn DocuBuilder signiert ausgeliefert wird (siehe CODE_SIGNING.md):
-# unsignierte Updates blockiert Smart App Control.
-UPDATES_ENABLED = False
+# Ordnername für Einstellungen: Nightly läuft getrennt von Stable und teilt keine Daten mit ihm.
+DATA_NAME = APP_NAME + ("-Nightly" if APP_CHANNEL == "nightly" else "")
+# Update-Funktion: in Nightly-Builds aktiv. Für Stable erst freischalten, wenn DocuBuilder signiert
+# ausgeliefert wird (siehe CODE_SIGNING.md): unsignierte Updates blockiert Smart App Control.
+UPDATES_ENABLED = APP_CHANNEL == "nightly"
 
 ADMIN_NAME = "Admin"                       # festes Konto, kann nicht gelöscht werden
 MIN_PW_LEN = 4
@@ -91,7 +93,7 @@ def resource(name):
 
 # Gleiche ID wie die Verknüpfungen des Installationsprogramms: Windows gruppiert das Fenster
 # dann in der Taskleiste unter dem DocuBuilder-Icon statt unter Python.
-APP_USER_MODEL_ID = "PatrickLange.DocuBuilder"
+APP_USER_MODEL_ID = "PatrickLange." + DATA_NAME.replace("-", ".")
 
 
 WIN = sys.platform.startswith("win")
@@ -194,7 +196,7 @@ def user_dir():
     try:
         if WIN:
             base = os.environ.get("APPDATA") or os.path.expanduser("~")
-            d = os.path.join(base, "DocuBuilder")
+            d = os.path.join(base, DATA_NAME)
         else:
             base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
             d = os.path.join(base, "docubuilder")
@@ -213,7 +215,7 @@ def machine_dir():
     if is_portable():
         return app_dir()
     if WIN:
-        return os.path.join(os.environ.get("ProgramData") or r"C:\ProgramData", "DocuBuilder")
+        return os.path.join(os.environ.get("ProgramData") or r"C:\ProgramData", DATA_NAME)
     # Unter Linux kann nur root /etc/docubuilder anlegen; bis dahin pro Benutzer.
     return LINUX_SHARED if os.path.isdir(LINUX_SHARED) or is_admin() else user_dir()
 
@@ -432,7 +434,7 @@ def _remove(path):
 
 def _own_dir(d):
     """Nur eigene DocuBuilder-Ordner ganz löschen, nie z. B. den Programmordner."""
-    return os.path.basename(os.path.normpath(d)).lower() == "docubuilder" and \
+    return os.path.basename(os.path.normpath(d)).lower() == DATA_NAME.lower() and \
         os.path.normcase(os.path.abspath(d)) != os.path.normcase(app_dir())
 
 
@@ -516,14 +518,15 @@ def _http(url, timeout=20):
 
 def find_update(channel=APP_CHANNEL, current=APP_VERSION, releases=None):
     """Neuestes Release, das neuer ist als die laufende Version, sonst None.
-    Stable sieht nur Stable-Releases, Nightly zusätzlich die Vorabversionen."""
+    Jeder Kanal sieht nur die Releases des eigenen Kanals (Stable nur Stable, Nightly nur Vorabversionen),
+    weil beide getrennt installiert sind und ein Stable-Paket die Nightly-Installation nicht ersetzt."""
     if releases is None:
         with _http(RELEASES_API) as r:
             releases = json.loads(r.read().decode("utf-8"))
     cur = parse_version(current)
     best = None
     for rel in releases:
-        if rel.get("draft") or (rel.get("prerelease") and channel != "nightly"):
+        if rel.get("draft") or bool(rel.get("prerelease")) != (channel == "nightly"):
             continue
         v = parse_version(rel.get("tag_name"))
         if v and v > cur and (best is None or v > best["version"]):
@@ -538,7 +541,7 @@ def _msi_installed():
     """True, wenn dieser Programmordner vom MSI-Paket angelegt wurde (Registrierung durch das Paket)."""
     try:
         import winreg
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\DocuBuilder") as k:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\" + APP_TITLE) as k:
             folder = winreg.QueryValueEx(k, "InstallDir")[0]
     except (ImportError, OSError):
         return False

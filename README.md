@@ -81,10 +81,10 @@ Stille Installation für die Softwareverteilung: `msiexec /i DocuBuilder-Setup-<
 Alternativ gibt es weiterhin die einzelne `DocuBuilder.exe` ohne Installation.
 
 ## Updates
-> **Hinweis:** Die Update-Funktion ist vorerst abgeschaltet (*Menü → Nach Updates suchen* ist ausgegraut). Sie wird freigeschaltet, sobald DocuBuilder signiert ausgeliefert wird, weil Smart App Control unsignierte Updates blockiert. Bis dahin neue Versionen über das Setup aus den [Releases](https://github.com/plange-dev/DocuBuilder/releases) installieren.
+> **Hinweis:** Die Update-Funktion ist in der **Nightly**-Version aktiv. In der **Stable**-Version ist sie vorerst abgeschaltet (*Menü → Nach Updates suchen* ist ausgegraut). Sie wird dort freigeschaltet, sobald DocuBuilder signiert ausgeliefert wird, weil Smart App Control unsignierte Updates blockiert. Bis dahin neue Versionen über das Setup aus den [Releases](https://github.com/plange-dev/DocuBuilder/releases) installieren.
 
 **Menü → Nach Updates suchen …** (oder *Einstellungen → Allgemein → Jetzt nach Updates suchen*) fragt die Releases auf GitHub ab:
-- Eine **Stable**-Version sucht nur Stable-Releases, eine **Nightly**-Version zusätzlich die Vorabversionen.
+- Eine **Stable**-Version sucht nur Stable-Releases, eine **Nightly**-Version nur Nightly-Vorabversionen (beide sind getrennt installiert).
 - Gibt es eine neuere Version, zeigt das Fenster die Änderungen. Das Update läuft in zwei Schritten (nur für den **Admin**):
   1. **Herunterladen:** lädt das Update und prüft die SHA-256-Prüfsumme. DocuBuilder kann dabei weiter benutzt werden.
   2. **DocuBuilder schließen und installieren:** Nach einer Rückfrage wird DocuBuilder geschlossen; erst dann wird installiert. Mit **Später** bleibt das Update bereit – beim Beenden von DocuBuilder wird noch einmal gefragt, ob es jetzt installiert werden soll.
